@@ -23,6 +23,18 @@ from parlaypal_worker.hit_rate import (
     generate_sofascore_form_dots,
     update_props_hit_rates,
 )
+from parlaypal_worker.presets import (
+    CombinedParlayResult,
+    CuratedPresetFeed,
+    PresetCard,
+    PresetError,
+    PresetLeg,
+    calculate_combined_parlay,
+    calculate_hybrid_value_score,
+    generate_conviction_rationale,
+    generate_curated_presets,
+    sync_preset_feed_to_redis,
+)
 from parlaypal_worker.weather import (
     StadiumWeatherAssessment,
     StadiumWeatherForecast,
@@ -37,10 +49,15 @@ __version__ = "0.1.0"
 
 __all__ = [
     "BatchDevigResult",
+    "CombinedParlayResult",
+    "CuratedPresetFeed",
     "DeviggingError",
     "EvaluatedPropRecord",
     "HitRateError",
     "PlayerGameStat",
+    "PresetCard",
+    "PresetError",
+    "PresetLeg",
     "PropDevigResult",
     "PropHitRateResult",
     "StadiumWeatherAssessment",
@@ -51,6 +68,8 @@ __all__ = [
     "WeatherContextBadge",
     "__version__",
     "american_to_decimal",
+    "calculate_combined_parlay",
+    "calculate_hybrid_value_score",
     "combine_independent_fair_probabilities",
     "compute_rolling_hit_rate",
     "decimal_to_american",
@@ -59,8 +78,11 @@ __all__ = [
     "evaluate_stadium_weather",
     "evaluate_two_way_prop",
     "format_hit_rate_string",
+    "generate_conviction_rationale",
+    "generate_curated_presets",
     "generate_sofascore_form_dots",
     "ingest_events_weather",
     "process_and_publish_ev_props",
+    "sync_preset_feed_to_redis",
     "update_props_hit_rates",
 ]
