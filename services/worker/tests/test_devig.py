@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import json
 import logging
-import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 
 from parlaypal_worker import celery_app as celery_app_module
@@ -98,7 +97,10 @@ def test_invalid_odds_and_sub_one_overround_raise_devigging_error() -> None:
     # Zero or negative bookmaker overround (1/D_1 + 1/D_2 <= 1.0) raises structured DeviggingError
     for sharp_pair in (
         (Decimal("2.0000"), Decimal("2.0000")),  # 0.5 + 0.5 == 1.0 (zero overround)
-        (Decimal("2.1000"), Decimal("2.1000")),  # 0.47619 + 0.47619 = 0.95238 < 1.0 (negative overround)
+        (
+            Decimal("2.1000"),
+            Decimal("2.1000"),
+        ),  # 0.47619 + 0.47619 = 0.95238 < 1.0 (negative overround)
     ):
         with pytest.raises(DeviggingError) as mult_exc:
             devig_multiplicative(*sharp_pair)
@@ -345,7 +347,7 @@ def test_process_and_publish_ev_props_persists_db_and_excludes_outliers_from_red
             sport_key=sport_key,
             home_team_id=home_team.team_id,
             away_team_id=away_team.team_id,
-            commence_time=datetime(2026, 11, 15, 21, 25, tzinfo=timezone.utc),
+            commence_time=datetime(2026, 11, 15, 21, 25, tzinfo=UTC),
             status="SCHEDULED",
         )
         session.add(event)
@@ -422,8 +424,7 @@ def test_process_and_publish_ev_props_persists_db_and_excludes_outliers_from_red
 
         # Verify all 4 props were persisted to PostgreSQL with quantized fair_probability & guarded_ev
         persisted_props = {
-            row.external_provider_id: row
-            for row in session.scalars(select(PlayerProp)).all()
+            row.external_provider_id: row for row in session.scalars(select(PlayerProp)).all()
         }
         assert set(persisted_props.keys()) == {
             "papi_prop_mahomes_pass_yds",
@@ -561,7 +562,11 @@ def test_cache_ev_feed_and_celery_task_enforce_circuit_breaker(
         {"external_provider_id": "papi_prop_bad", "status": "SUSPECT_STALE_LINE"},
         {"external_provider_id": "papi_prop_sub", "guarded_ev": "0.01000"},
         {"external_provider_id": "papi_prop_nan", "guarded_ev": "not-a-decimal"},
-        {"external_provider_id": "papi_prop_wrong_sport", "sport_key": "americanfootball_nfl", "ev": "0.0400"},
+        {
+            "external_provider_id": "papi_prop_wrong_sport",
+            "sport_key": "americanfootball_nfl",
+            "ev": "0.0400",
+        },
     ):
         with pytest.raises(ValueError):
             cache_ev_feed(fake_redis, "basketball_nba", [bad_dict])

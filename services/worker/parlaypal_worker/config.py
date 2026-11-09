@@ -1,8 +1,8 @@
 """Typed configuration for the ParlayPal worker service."""
 
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SUPPORTED_SPORT_KEYS: tuple[str, ...] = (
     "americanfootball_nfl",

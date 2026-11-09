@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import logging
-from typing import Any, Literal, Sequence
 import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from scipy.optimize import brentq
@@ -244,7 +245,7 @@ def _compute_power_raw(
     p2_f = float(p2)
 
     def objective(k: float) -> float:
-        return (p1_f**k) + (p2_f**k) - 1.0
+        return float((p1_f**k) + (p2_f**k) - 1.0)
 
     lower_bound = 1.0
     upper_bound = 100.0
@@ -531,7 +532,9 @@ class TwoWayPropMarketInput(BaseModel):
         )
         for field_name in numeric_fields:
             if field_name in normalized and isinstance(normalized[field_name], bool):
-                raise ValueError(f"Boolean value is not permitted for numeric field '{field_name}'.")
+                raise ValueError(
+                    f"Boolean value is not permitted for numeric field '{field_name}'."
+                )
 
         # Offered odds aliases & American conversion at ingestion boundary
         if "offered_decimal_odds" not in normalized or normalized["offered_decimal_odds"] is None:
@@ -665,7 +668,7 @@ def process_and_publish_ev_props(
     outlier_count = 0
     positive_ev_count = 0
     high_value_count = 0
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
 
     try:
         for market in parsed_inputs:

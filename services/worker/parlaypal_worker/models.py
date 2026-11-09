@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -21,7 +21,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 def utc_now() -> datetime:
     """Return timezone-aware UTC timestamp."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any
 
 from celery import Celery
 from sqlalchemy.orm import Session
@@ -45,7 +46,7 @@ def health_check() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "parlaypal_worker",
-        "timestamp": format_iso8601_utc(datetime.now(timezone.utc)),
+        "timestamp": format_iso8601_utc(datetime.now(UTC)),
     }
 
 
@@ -80,9 +81,7 @@ def evaluate_prop_markets(
                 resolved_markets: Sequence[TwoWayPropMarketInput | dict[str, Any]] = candidate
                 break
         else:
-            raise ValueError(
-                "Payload dict must contain a 'markets', 'props', or 'items' sequence."
-            )
+            raise ValueError("Payload dict must contain a 'markets', 'props', or 'items' sequence.")
     else:
         if prop_markets is None:
             raise ValueError("prop_markets sequence is required when sport_key is passed as str.")

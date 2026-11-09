@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import json
 import logging
 import re
-from typing import Any
 import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -151,7 +151,7 @@ def test_entity_persistence_uuid_v4_and_check_constraints() -> None:
             sport_key="americanfootball_nfl",
             home_team_id=home_team.team_id,
             away_team_id=away_team.team_id,
-            commence_time=datetime(2026, 11, 15, 21, 25, tzinfo=timezone.utc),
+            commence_time=datetime(2026, 11, 15, 21, 25, tzinfo=UTC),
             status="SCHEDULED",
         )
         session.add(event)
@@ -226,7 +226,7 @@ def test_entity_persistence_uuid_v4_and_check_constraints() -> None:
             sport_key="americanfootball_nfl",
             home_team_id=home_team.team_id,
             away_team_id=home_team.team_id,
-            commence_time=datetime(2026, 11, 16, 20, 0, tzinfo=timezone.utc),
+            commence_time=datetime(2026, 11, 16, 20, 0, tzinfo=UTC),
             status="SCHEDULED",
         )
         session.add(same_team_event)
@@ -289,7 +289,7 @@ def test_publish_odds_delta_sets_45s_ttl_and_publishes_iso8601_utc_frame() -> No
                 decimal_odds=Decimal("1.9524"),
             )
         ],
-        updated_at=datetime(2026, 11, 9, 4, 30, 15, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 11, 9, 4, 30, 15, tzinfo=UTC),
     )
 
     serialized = publish_odds_delta(fake_redis, frame)

@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from functools import lru_cache
 import json
-from typing import Any, Literal, Protocol, Sequence
 import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from functools import lru_cache
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 import redis
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from parlaypal_worker.config import SUPPORTED_SPORT_KEYS, get_settings
 
@@ -36,9 +44,9 @@ class RedisLike(Protocol):
 def format_iso8601_utc(value: datetime) -> str:
     """Format a datetime as strict ISO 8601 UTC (`YYYY-MM-DDTHH:mm:ssZ`)."""
     if value.tzinfo is None:
-        utc_dt = value.replace(tzinfo=timezone.utc)
+        utc_dt = value.replace(tzinfo=UTC)
     else:
-        utc_dt = value.astimezone(timezone.utc)
+        utc_dt = value.astimezone(UTC)
     return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -135,7 +143,7 @@ class OddsDeltaFrame(BaseModel):
         allow_inf_nan=False,
     )
     quotes: list[PropOddsQuote] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("external_provider_id")
     @classmethod
@@ -223,7 +231,7 @@ class EvaluatedPropFeedItem(BaseModel):
     value_tier: Literal["POSITIVE_VALUE", "HIGH_VALUE"] = "POSITIVE_VALUE"
     is_positive_ev: bool = True
     is_high_value: bool = False
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("external_provider_id")
     @classmethod
@@ -240,7 +248,9 @@ class EvaluatedPropFeedItem(BaseModel):
         if self.status != "ACTIVE" or not self.is_positive_ev:
             raise ValueError("Only ACTIVE positive-EV props may be cached in ev:feed.")
         if self.guarded_ev < POSITIVE_EV_MIN_THRESHOLD:
-            raise ValueError("Sub-threshold props with guarded_ev < 1.5% cannot be cached in ev:feed.")
+            raise ValueError(
+                "Sub-threshold props with guarded_ev < 1.5% cannot be cached in ev:feed."
+            )
         if self.guarded_ev > OUTLIER_GUARD_MAX_EV:
             raise ValueError("Outlier props with guarded_ev > 10.0% cannot be cached in ev:feed.")
 
@@ -327,9 +337,7 @@ def publish_odds_delta(
     and publish JSON frame to `odds:feed:{sport_key}`.
     """
     frame = (
-        payload
-        if isinstance(payload, OddsDeltaFrame)
-        else OddsDeltaFrame.model_validate(payload)
+        payload if isinstance(payload, OddsDeltaFrame) else OddsDeltaFrame.model_validate(payload)
     )
     serialized = frame.model_dump_json()
     cache_key = odds_latest_key(frame.sport_key, frame.event_id)
@@ -362,13 +370,18 @@ def cache_ev_feed(
             normalized_items.append(item.model_dump(mode="json"))
         elif isinstance(item, dict):
             item_sport_key = item.get("sport_key")
-            if item_sport_key is not None and _validate_sport_key(str(item_sport_key)) != validated_sport_key:
+            if (
+                item_sport_key is not None
+                and _validate_sport_key(str(item_sport_key)) != validated_sport_key
+            ):
                 raise ValueError(
                     f"Feed item sport_key '{item_sport_key}' does not match '{validated_sport_key}'."
                 )
             status_val = item.get("status")
             if status_val is not None and status_val != "ACTIVE":
-                raise ValueError(f"Cannot publish non-ACTIVE market (status={status_val!r}) to ev:feed.")
+                raise ValueError(
+                    f"Cannot publish non-ACTIVE market (status={status_val!r}) to ev:feed."
+                )
             tier_val = item.get("value_tier")
             if tier_val is not None and tier_val not in ("POSITIVE_VALUE", "HIGH_VALUE"):
                 raise ValueError(f"Cannot publish market with value_tier={tier_val!r} to ev:feed.")
@@ -388,7 +401,9 @@ def cache_ev_feed(
                 if ev_dec > OUTLIER_GUARD_MAX_EV:
                     raise ValueError("Cannot publish market with EV > 10.0% to ev:feed.")
                 if ev_dec < POSITIVE_EV_MIN_THRESHOLD:
-                    raise ValueError("Cannot publish sub-threshold market with EV < 1.5% to ev:feed.")
+                    raise ValueError(
+                        "Cannot publish sub-threshold market with EV < 1.5% to ev:feed."
+                    )
 
             if {
                 "external_provider_id",
@@ -409,7 +424,7 @@ def cache_ev_feed(
 
     envelope = {
         "sport_key": validated_sport_key,
-        "updated_at": format_iso8601_utc(datetime.now(timezone.utc)),
+        "updated_at": format_iso8601_utc(datetime.now(UTC)),
         "items": normalized_items,
     }
     serialized = json.dumps(envelope, default=str)
@@ -427,7 +442,7 @@ def cache_sgp_audit(
     """Cache SGP pricing audit entry at `sgp:audit:{event_id}` with 45-second TTL."""
     envelope = {
         "event_id": str(event_id),
-        "updated_at": format_iso8601_utc(datetime.now(timezone.utc)),
+        "updated_at": format_iso8601_utc(datetime.now(UTC)),
         "audit": audit_data,
     }
     serialized = json.dumps(envelope, default=str)
