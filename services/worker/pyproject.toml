@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parlaypal-worker"
+version = "0.1.0"
+description = "ParlayPal quantitative ingestion and Celery worker service"
+requires-python = ">=3.13"
+dependencies = [
+    "celery>=5.4.0",
+    "redis>=5.0.0",
+    "sqlalchemy>=2.0.0",
+    "psycopg>=3.1.0",
+    "psycopg[binary]>=3.1.0; sys_platform != 'win32' or platform_machine != 'ARM64'",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "scipy>=1.13.0",
+    "httpx>=0.27.0",
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["parlaypal_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

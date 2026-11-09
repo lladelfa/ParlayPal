@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ParlayPal - Sports Betting Telemetry &amp; Parlay Builder</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Outfit:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "error-container": "#93000a",
+            "surface-bright": "#353943",
+            "surface": "#0f131c",
+            "surface-container": "#1c1f29",
+            "secondary-fixed-dim": "#c0c1ff",
+            "on-tertiary": "#003824",
+            "on-secondary-fixed": "#07006c",
+            "on-secondary": "#1000a9",
+            "inverse-on-surface": "#2c303a",
+            "secondary-container": "#3131c0",
+            "outline": "#869397",
+            "on-primary-container": "#00424f",
+            "on-secondary-fixed-variant": "#2f2ebe",
+            "tertiary": "#4edea3",
+            "inverse-surface": "#dfe2ef",
+            "surface-dim": "#0f131c",
+            "on-surface-variant": "#bcc9cd",
+            "on-error": "#690005",
+            "surface-tint": "#4cd7f6",
+            "surface-container-low": "#181b25",
+            "secondary-fixed": "#e1e0ff",
+            "on-primary-fixed": "#001f26",
+            "on-tertiary-fixed": "#002113",
+            "on-primary": "#003640",
+            "surface-container-lowest": "#0a0e17",
+            "on-primary-fixed-variant": "#004e5c",
+            "primary-container": "#06b6d4",
+            "error": "#ffb4ab",
+            "on-secondary-container": "#b0b2ff",
+            "outline-variant": "#3d494c",
+            "tertiary-fixed-dim": "#4edea3",
+            "primary-fixed": "#acedff",
+            "tertiary-container": "#1bbd85",
+            "inverse-primary": "#00687a",
+            "on-background": "#dfe2ef",
+            "background": "#0f131c",
+            "on-tertiary-container": "#00452e",
+            "surface-variant": "#31353f",
+            "on-tertiary-fixed-variant": "#005236",
+            "on-surface": "#dfe2ef",
+            "surface-container-highest": "#31353f",
+            "on-error-container": "#ffdad6",
+            "surface-container-high": "#262a34",
+            "secondary": "#c0c1ff",
+            "primary-fixed-dim": "#4cd7f6",
+            "tertiary-fixed": "#6ffbbe",
+            "primary": "#4cd7f6"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter": "1rem",
+            "space-md": "0.75rem",
+            "margin": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.25rem",
+            "space-xs": "0.25rem",
+            "gutter-desktop": "1.5rem",
+            "margin-tablet": "1.5rem",
+            "space-sm": "0.5rem",
+            "margin-desktop": "2rem"
+          },
+          "fontFamily": {
+            "headline-lg": ["Space Grotesk"],
+            "data-mono-md": ["JetBrains Mono"],
+            "body-md": ["Outfit"],
+            "label-caps": ["Outfit"],
+            "body-sm": ["Outfit"],
+            "headline-md": ["Space Grotesk"],
+            "headline-xl-mobile": ["Space Grotesk"],
+            "data-mono-lg": ["JetBrains Mono"],
+            "headline-xl": ["Space Grotesk"],
+            "data-mono-sm": ["JetBrains Mono"],
+            "body-lg": ["Outfit"],
+            "headline-lg-mobile": ["Space Grotesk"],
+            "headline-sm": ["Space Grotesk"]
+          },
+          "fontSize": {
+            "headline-lg": ["28px", { "lineHeight": "36px", "letterSpacing": "-0.015em", "fontWeight": "700" }],
+            "data-mono-md": ["14px", { "lineHeight": "18px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+            "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+            "label-caps": ["11px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "600" }],
+            "body-sm": ["12px", { "lineHeight": "16px", "fontWeight": "400" }],
+            "headline-md": ["20px", { "lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+            "headline-xl-mobile": ["28px", { "lineHeight": "36px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "data-mono-lg": ["18px", { "lineHeight": "22px", "letterSpacing": "-0.03em", "fontWeight": "700" }],
+            "headline-xl": ["36px", { "lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+            "data-mono-sm": ["11px", { "lineHeight": "14px", "letterSpacing": "0em", "fontWeight": "500" }],
+            "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+            "headline-lg-mobile": ["22px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "headline-sm": ["16px", { "lineHeight": "22px", "fontWeight": "600" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    .cyan-glow {
+      box-shadow: 0 0 16px -2px rgba(6, 182, 212, 0.35);
+    }
+    .cyan-subtle-glow {
+      box-shadow: inset 0 0 14px rgba(6, 182, 212, 0.12);
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #0a0e17;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface antialiased min-h-screen selection:bg-primary-container selection:text-surface-container-lowest custom-scroll overflow-x-hidden">
+<!-- TOP APP BAR -->
+<header class="w-full px-space-lg lg:px-margin-desktop flex items-center justify-between h-16 sticky top-0 z-40 bg-surface-container-lowest dark:bg-surface-container-lowest border-b border-outline-variant">
+<div class="flex items-center gap-space-lg">
+<!-- Brand Logo -->
+<a class="font-headline-md text-headline-md font-bold tracking-tight text-primary dark:text-primary flex items-center gap-1.5 focus:outline-none" href="#">
+<span class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center border border-primary-container text-primary shadow-[0_0_12px_rgba(6,182,212,0.4)]">
+<span class="material-symbols-outlined text-primary text-xl" style="font-variation-settings: 'FILL' 1;">bolt</span>
+</span>
+<span>ParlayPal</span>
+<span class="ml-1.5 px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant text-[10px] font-data-mono-sm text-data-mono-sm text-primary uppercase font-bold tracking-wider">
+          PRO TELEMETRY
+        </span>
+</a>
+<!-- Sports Switcher Navigation Links -->
+<nav class="hidden md:flex items-center gap-space-md ml-4">
+<!-- NFL Active -->
+<a class="text-primary dark:text-primary border-b-2 border-primary dark:border-primary font-headline-sm text-headline-sm pb-1 flex items-center gap-1" href="#nfl">
+<span>🏈</span> NFL
+        </a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface dark:hover:text-on-surface font-headline-sm text-headline-sm pb-1 flex items-center gap-1 transition-colors" href="#nba">
+<span>🏀</span> NBA
+        </a>
+<a class="text-on-surface-variant/60 dark:text-on-surface-variant/60 font-headline-sm text-headline-sm pb-1 flex items-center gap-1 cursor-not-allowed" href="#nhl">
+<span>🏒</span> NHL
+          <span class="text-[9px] px-1 bg-surface-container text-outline rounded uppercase">Soon</span>
+</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface dark:hover:text-on-surface font-headline-sm text-headline-sm pb-1 flex items-center gap-1 transition-colors" href="#mlb">
+<span>⚾</span> MLB
+        </a>
+</nav>
+</div>
+<!-- Center Slate Filter Pills -->
+<div class="hidden xl:flex items-center bg-surface-container-low p-1 rounded-lg border border-outline-variant text-label-caps font-label-caps">
+<button class="px-3 py-1 rounded bg-surface-container text-primary font-bold shadow-sm">Today</button>
+<button class="px-3 py-1 rounded text-on-surface-variant hover:text-on-surface transition-colors">Tomorrow</button>
+<button class="px-3 py-1 rounded text-on-surface-variant hover:text-on-surface transition-colors">Weekend Slate</button>
+</div>
+<!-- Search, Telemetry Latency & Trailing Actions -->
+<div class="flex items-center gap-3">
+<!-- Search Input -->
+<div class="hidden lg:flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-lg px-3 py-1.5 focus-within:border-primary transition-colors">
+<span class="material-symbols-outlined text-outline text-lg">search</span>
+<input class="bg-transparent border-0 text-body-sm font-body-sm text-on-surface placeholder:text-outline focus:ring-0 p-0 w-44 xl:w-56" placeholder="Search props, players, teams..." type="text"/>
+<span class="px-1.5 py-0.5 bg-surface-container border border-outline-variant text-[10px] font-data-mono-sm text-outline rounded">⌘K</span>
+</div>
+<!-- Real-Time Telemetry Feed Status -->
+<div class="hidden sm:flex items-center gap-2 px-2.5 py-1 bg-surface-container-low border border-outline-variant rounded-lg">
+<span class="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_#10b981] animate-pulse"></span>
+<span class="font-data-mono-sm text-data-mono-sm text-tertiary">18ms</span>
+<span class="font-label-caps text-[10px] text-outline uppercase hidden xl:inline">real-time feed</span>
+</div>
+<!-- Trailing Action Icons -->
+<button aria-label="Notifications" class="relative p-2 rounded-lg bg-surface-container-low border border-outline-variant hover:border-primary text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-lg">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full shadow-[0_0_6px_#06b6d4]"></span>
+</button>
+<button aria-label="Tune Preferences" class="p-2 rounded-lg bg-surface-container-low border border-outline-variant hover:border-primary text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-lg">tune</span>
+</button>
+<!-- Primary Action CTA Button -->
+<button class="hidden md:flex items-center gap-1.5 bg-primary hover:bg-primary-container text-on-primary-fixed px-3.5 py-1.5 rounded font-headline-sm text-headline-sm transition-all shadow-[0_0_14px_rgba(6,182,212,0.35)] active:scale-95">
+<span class="material-symbols-outlined text-sm font-bold">bolt</span>
+<span>Build Slip</span>
+</button>
+<!-- User Profile Avatar -->
+<div class="flex items-center pl-2 border-l border-outline-variant">
+<img class="w-8 h-8 rounded-full border border-outline-variant object-cover ring-1 ring-primary/40" data-alt="Close up photographic avatar of a disciplined young sports quantitative analyst wearing sleek black telemetry audio monitors against a dark navy studio background with soft cyan rim lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCm4MxSNAvpK6vjZQf5d5cyQLMzl9etoLVN4yEfhmrLESRzqYIjp0RUENNXZG33M5XqNkcyK_jEtmeLhb-06r01ENjdv2uuIKanPSrm6VRtqvJvCQ9uAefREPbhY0NiLzbWcjt7eOFOtUt0tvJVDCeAupaZb5ONzpTS290lrpwKh2jL4abACMnOavSpGFQBjZ78Qt-YVcE50sQrM-RmYAAmPheLMB9BPESAOVDzBu2VWlwbA9LtvZffn6ZoX84IWZR6d-ZfnXTSouh"/>
+</div>
+</div>
+</header>
+<!-- APP SHELL CONTAINER -->
+<div class="flex min-h-[calc(100vh-4rem)] relative">
+<!-- FIXED LEFT SIDEBAR (SideNavBar from JSON Anchor) -->
+<aside class="hidden xl:flex fixed left-0 top-16 bottom-0 w-64 flex-col justify-between p-space-md z-30 bg-surface-container-low dark:bg-surface-container-low border-r border-outline-variant">
+<div class="flex flex-col gap-5">
+<!-- Telemetry Header Engine Badge -->
+<div class="p-3 bg-surface-container-lowest rounded-lg border border-outline-variant flex items-center gap-3">
+<div class="w-9 h-9 rounded bg-surface-container border border-primary/30 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">query_stats</span>
+</div>
+<div>
+<div class="font-headline-sm text-headline-sm font-bold text-on-surface leading-tight">Telemetry Engine</div>
+<div class="font-data-mono-sm text-[11px] text-tertiary">v2.4 Quant Feed Active</div>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<nav class="flex flex-col gap-1">
+<!-- Active Tab: Parlay Builder -->
+<a class="flex items-center gap-3 px-space-md py-space-sm bg-surface-container dark:bg-surface-container text-primary dark:text-primary border-l-2 border-primary dark:border-primary font-headline-sm text-headline-sm rounded-r-lg" href="#">
+<span class="material-symbols-outlined text-lg">bolt</span>
+<span>Parlay Builder</span>
+</a>
+<a class="flex items-center gap-3 px-space-md py-space-sm text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest dark:hover:bg-surface-container-lowest font-headline-sm text-headline-sm rounded-r-lg transition-colors" href="#">
+<span class="material-symbols-outlined text-lg">query_stats</span>
+<span>EV Terminal</span>
+</a>
+<a class="flex items-center gap-3 px-space-md py-space-sm text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest dark:hover:bg-surface-container-lowest font-headline-sm text-headline-sm rounded-r-lg transition-colors" href="#">
+<span class="material-symbols-outlined text-lg">hub</span>
+<span>Live Correlated</span>
+</a>
+<a class="flex items-center gap-3 px-space-md py-space-sm text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest dark:hover:bg-surface-container-lowest font-headline-sm text-headline-sm rounded-r-lg transition-colors" href="#">
+<span class="material-symbols-outlined text-lg">compare_arrows</span>
+<span>Lineshopper</span>
+</a>
+<a class="flex items-center gap-3 px-space-md py-space-sm text-on-surface-variant dark:text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest dark:hover:bg-surface-container-lowest font-headline-sm text-headline-sm rounded-r-lg transition-colors" href="#">
+<span class="material-symbols-outlined text-lg">receipt_long</span>
+<span>Slip History</span>
+</a>
+</nav>
+<!-- CTA Button -->
+<button class="w-full py-2 px-3 rounded bg-surface-container hover:bg-surface-bright text-tertiary border border-tertiary/40 font-headline-sm text-body-sm flex items-center justify-center gap-2 transition-all">
+<span class="material-symbols-outlined text-sm">auto_graph</span>
+<span>Quick Stage +EV Slip</span>
+</button>
+</div>
+<!-- Bottom Settings & System Latency -->
+<div class="border-t border-outline-variant pt-3 flex flex-col gap-1">
+<a class="flex items-center gap-2.5 px-3 py-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest font-body-sm text-body-sm rounded transition-colors" href="#">
+<span class="material-symbols-outlined text-base">settings</span>
+<span>Odds Settings</span>
+</a>
+<a class="flex items-center justify-between px-3 py-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-lowest font-body-sm text-body-sm rounded transition-colors" href="#">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-base">speed</span>
+<span>System Latency</span>
+</div>
+<span class="font-data-mono-sm text-[10px] text-tertiary">0.012s</span>
+</a>
+</div>
+</aside>
+<!-- CENTER MAIN CANVAS FEED (Left Margin adjusted for sidebar) -->
+<main class="flex-1 xl:ml-64 xl:mr-96 px-4 sm:px-6 lg:px-8 py-6 max-w-7xl">
+<!-- HERO HEADER SECTION -->
+<section class="mb-8">
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2">
+<span class="px-2 py-0.5 rounded bg-primary/10 border border-primary/30 text-primary font-data-mono-sm text-data-mono-sm flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+              ALGORITHMIC MODEL RUN #4,192
+            </span>
+<span class="text-outline text-body-sm font-body-sm">• Updated 2 mins ago</span>
+</div>
+<h1 class="font-headline-xl text-headline-xl font-bold tracking-tight text-on-surface">
+            Today's High-Conviction Preset Parlays
+          </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">
+            Automated trend research, weather impact analysis, and fair odds (+EV) modeled over 25,000 simulations.
+          </p>
+</div>
+<!-- Telemetry Metrics Ticker Row -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-3.5 flex items-center gap-3">
+<div class="w-9 h-9 rounded bg-tertiary/10 border border-tertiary/30 text-tertiary flex items-center justify-center">
+<span class="material-symbols-outlined text-lg">trending_up</span>
+</div>
+<div>
+<div class="font-label-caps text-label-caps text-on-surface-variant uppercase">Total Staged Value</div>
+<div class="font-data-mono-lg text-data-mono-lg text-tertiary">+32.4% EV <span class="text-xs text-outline font-normal">across slates</span></div>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-3.5 flex items-center gap-3">
+<div class="w-9 h-9 rounded bg-primary/10 border border-primary/30 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-lg">verified</span>
+</div>
+<div>
+<div class="font-label-caps text-label-caps text-on-surface-variant uppercase">Model Win Rate L30</div>
+<div class="font-data-mono-lg text-data-mono-lg text-on-surface">68.2% <span class="text-xs text-tertiary font-normal">(+14.8u)</span></div>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-3.5 flex items-center gap-3">
+<div class="w-9 h-9 rounded bg-secondary/10 border border-secondary/30 text-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-lg">show_chart</span>
+</div>
+<div>
+<div class="font-label-caps text-label-caps text-on-surface-variant uppercase">Market Consensus</div>
+<div class="font-data-mono-lg text-data-mono-lg text-secondary">Sharp Action on Overs</div>
+</div>
+</div>
+</div>
+</section>
+<!-- THREE CURATED PRESET PARLAY CARDS -->
+<section class="flex flex-col gap-6">
+<!-- CARD 1: THE RED ZONE EXPRESS -->
+<article class="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden shadow-lg transition-all hover:border-outline">
+<!-- Card Header Bar -->
+<div class="p-5 border-b border-outline-variant bg-surface-container flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest border border-primary/40 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl">sports_football</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<h2 class="font-headline-lg text-headline-lg font-bold text-on-surface tracking-tight">The Red Zone Express</h2>
+<span class="px-2 py-0.5 bg-surface-container-high text-on-surface-variant rounded text-[11px] font-data-mono-sm">#PRESET-NFL-01</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">NFL Anytime Touchdown • 3 Legs</p>
+</div>
+</div>
+<!-- Big Odds Badge & EV Pill -->
+<div class="flex items-center gap-3">
+<div class="px-2.5 py-1 rounded bg-tertiary/10 border border-tertiary/40 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-tertiary text-sm">verified_user</span>
+<span class="font-data-mono-md text-data-mono-md text-tertiary font-bold">+4.1% EV</span>
+<span class="text-[10px] text-on-surface-variant uppercase hidden sm:inline">(Sharp Discrepancy)</span>
+</div>
+<div class="px-3.5 py-1.5 rounded-lg bg-surface-container-lowest border-2 border-primary text-primary font-data-mono-lg text-data-mono-lg font-bold shadow-[0_0_14px_rgba(6,182,212,0.3)]">
+                +485
+              </div>
+</div>
+</div>
+<!-- 3 Legs Breakdown List -->
+<div class="divide-y divide-outline-variant">
+<!-- Leg 1: Derrick Henry -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Athletic portrait photo of professional football power running back Derrick Henry wearing dark purple practice gear with intense focus under high-contrast sports stadium lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBMBMeFhVoAy5Da-F2FDSmI202_TcUMx5wbxUCS2uB7DELR1cV3DXI60nwRaiJTWU1-Vw-HOH1GnBJnKxp3G0l-IOxDWMm69rJuR9G5a0W6UsfUO91ZuBob78_qx5HAXTLv4hoZS5ooYm3LMNAiv4HX9F31SMcVNDegCcvstKHrzy0yX2qjwfRw6c8Uj1ADVOY4DpcTXXC5KBebpniOgRImtCyDWA01g3OO8gzohkLx9TUmut7UIR2VT8Xsr50F9foIQr908nCdug1e"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">BAL</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Derrick Henry</span>
+<span class="text-outline text-body-sm font-body-sm">BAL @ PIT • RB</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Anytime TD</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Facing Steelers 28th-ranked goal-line front; 89% snap share in red zone.
+                  </p>
+<!-- Telemetry and Weather Badges -->
+<div class="flex items-center gap-3 mt-2 flex-wrap">
+<!-- Rolling Form Dots -->
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">8/10 L10 hit rate</span>
+</div>
+<!-- Weather Badge -->
+<div class="flex items-center gap-1.5 px-2 py-1 rounded bg-[#f59e0b]/10 border border-[#f59e0b]/40 text-[#f59e0b] text-[11px] font-data-mono-sm">
+<span class="material-symbols-outlined text-sm">cloud_queue</span>
+<span>Highmark Stadium: 22mph wind &amp; light sleet</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-135</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 2: CeeDee Lamb -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Studio sports headshot of NFL star wide receiver CeeDee Lamb in athletic navy team compression top looking confident and determined under sharp rim lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCjzPpF9bVbeX0x9o3nNSNWrHkPASa9I1fwE02WjcC1NY-oH1E0tVv96cZeQHsjcRPox8EAyuAyB2EA35vzAto-lsNu0QYOKSQmO6yvwteCenkKvNwhH_g1hG-MTQ4-ezYZ493lCqQ8aLcOFtWK2qSj_eXHnjfNo2KWGjpxGTM1Fw2hWkkJASkuRqH8YPRotDIWgC7GiGLfn9khFzz5RTHoCVH-_wR0RRaN0pJX3xIrgVZQejGolTZE0aocL5Jy0yf84d-UMQMtxPRu"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">DAL</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">CeeDee Lamb</span>
+<span class="text-outline text-body-sm font-body-sm">DAL vs PHI • WR</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Anytime TD</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Target share 34.2%; shadow corner ruled OUT with hamstring.
+                  </p>
+<!-- Rolling Form Dots -->
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="text-[11px] font-data-mono-sm text-tertiary font-bold ml-1">9/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">+115</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 3: Jahmyr Gibbs -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Dynamic portrait of running back Jahmyr Gibbs with dreadlocks and athletic sportswear against a dark telemetry sports studio backdrop with cyan accents." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBCjWlDIFEu_sB_MGCB6wq54cBaChNa6GrewZet7nRRzuFvVUBbKAZzOoGFth6TVU_tUja7b8M0c7-1NPmUQ-uIDV3A2o2GIxLC3U7ggM9hKE8Uqkxr7n8epYIyBHM_jEsPuK0SyoRZvp3Z1_xRzYuY18N2SqKL-T2a8L4NzM8qgy9rAX-47Pd6Dlb9GjaKNNgBP_MhYqV2AHWFnqgD7Q3xmAdRepZ9sWa4KxiQvKzRHFlxqoRYbGeGoWlt2X7lV7qQ4P0zKZDrxQVE"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">DET</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Jahmyr Gibbs</span>
+<span class="text-outline text-body-sm font-body-sm">DET vs GB • RB</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Anytime TD</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    14 red zone touches in last 3 weeks with 4 end-zone looks.
+                  </p>
+<!-- Rolling Form Dots -->
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">7/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-105</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+</div>
+<!-- Card Actions Footer -->
+<div class="p-4 bg-surface-container/60 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
+<button class="px-4 py-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface border border-outline-variant font-headline-sm text-body-sm flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-base">tune</span>
+<span>Customize Legs</span>
+</button>
+<button class="px-5 py-2.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary-fixed font-headline-sm text-headline-sm font-bold flex items-center gap-2 cyan-glow transition-all active:scale-95">
+<span class="material-symbols-outlined text-lg font-bold">bolt</span>
+<span>Open in Sportsbook via QuickPick</span>
+</button>
+</div>
+</article>
+<!-- CARD 2: THE FLOOR GENERALS -->
+<article class="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden shadow-lg transition-all hover:border-outline">
+<!-- Card Header Bar -->
+<div class="p-5 border-b border-outline-variant bg-surface-container flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest border border-primary/40 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl">sports_basketball</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<h2 class="font-headline-lg text-headline-lg font-bold text-on-surface tracking-tight">The Floor Generals</h2>
+<span class="px-2 py-0.5 bg-surface-container-high text-on-surface-variant rounded text-[11px] font-data-mono-sm">#PRESET-NBA-04</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">NBA Player Points • 3 Legs</p>
+</div>
+</div>
+<!-- Big Odds Badge & EV Pill -->
+<div class="flex items-center gap-3">
+<div class="px-2.5 py-1 rounded bg-tertiary/10 border border-tertiary/40 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-tertiary text-sm">verified_user</span>
+<span class="font-data-mono-md text-data-mono-md text-tertiary font-bold">+3.8% EV</span>
+</div>
+<div class="px-3.5 py-1.5 rounded-lg bg-surface-container-lowest border-2 border-primary text-primary font-data-mono-lg text-data-mono-lg font-bold shadow-[0_0_14px_rgba(6,182,212,0.3)]">
+                +420
+              </div>
+</div>
+</div>
+<!-- 3 Legs Breakdown List -->
+<div class="divide-y divide-outline-variant">
+<!-- Leg 1: Shai Gilgeous-Alexander -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Athletic headshot of basketball star Shai Gilgeous-Alexander with braided hairstyle looking focused wearing high-tech navy and electric blue athletic jersey against studio backdrop." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJB9EO8flE2n1xkIwYaU4FHjk82HxXZnFA4bX9IBq5cN3OdPb-piNaehEVpSYLCCBr9RMB0pEeZP2GSBkgXugI6M39vtIRlv5LkZflj6Ktid8F5BkGLbhpt2u0LljnvK3pJMy5-ZhufTReMlVTPMtz29vlSFYXvAjLzXyiKSLuzByhV4Psv1pec8OH1qCGfqYPS1YRdMiI3aDIjT6WgC7DInELlIbmygZNSpyQpt0Kcff2qP64xd6im3da2TRduJRROUkLLwEmXWHd"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">OKC</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Shai Gilgeous-Alexander</span>
+<span class="text-outline text-body-sm font-body-sm">OKC vs SAC • PG</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Over 28.5 PTS</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Averaging 33.4 PPG vs bottom-10 pick-and-roll defensive coverage.
+                  </p>
+<!-- Form and Venue Badge -->
+<div class="flex items-center gap-3 mt-2 flex-wrap">
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="text-[11px] font-data-mono-sm text-tertiary font-bold ml-1">10/10 L10 hit rate</span>
+</div>
+<div class="flex items-center gap-1.5 px-2 py-1 rounded bg-surface-container border border-outline-variant text-on-surface text-[11px] font-data-mono-sm">
+<span class="material-symbols-outlined text-sm text-primary">stadium</span>
+<span>Paycom Center • Fast Pace (102.4)</span>
+</div>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-118</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 2: Anthony Edwards -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="High quality athletic profile portrait of dynamic basketball player Anthony Edwards under cinematic arena spotlighting wearing black and navy team warmups." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCEepIiLo21HiR_-UvwQTRXkU1UfeprqZcssiKRUInD4iewcQKvTnmkphMl1aaNnQJCu68N0mOxB8YTMPxL8nTwV3H9NeEN-hvfBlO8mEKa5KARhYCypaKzgM6u7OYFAIjPvOFEpCVYoLLoin2TsuZn3x1j0Nq9GsHqdv9yooH60Jv7X5gKSQMFVRUkgs2k_Unw_FexkE9Kserym4d26SGp_mCylP56Bywx15pKGMAcEAawGjEABe9bCROtTq7nFYDutJo_S_fg8yP2"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">MIN</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Anthony Edwards</span>
+<span class="text-outline text-body-sm font-body-sm">MIN vs DEN • SG</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Over 24.5 PTS</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Usage rate jumps to 36.1% in national TV rivalry matchups.
+                  </p>
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">8/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-110</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 3: Jalen Brunson -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Close up sharp headshot of guard Jalen Brunson wearing professional blue and orange trimmed athletic jersey with gritty determination under arena studio lights." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCTie0MnCecvn9cXt6aWaYvUXZjghXJCqwTsAP0PeEPg7-TimbYAZTNYexY3_iCMXCn_yMWe0hCXdzs5j5w4z39HpK9CM5ULgRIGtB-3hKCLf0ohcnOFqH4Jiak5hkx12UMnSXA-wp3m48KQlk-rv4rgAlGGYnSjIurfDKoK96l1zO7r_PgQxjsOEtFpkve-IbX_n6pWeGA-4Ewt0WwrfjPoE753iwp_iz7nyHaYQFA5M9uqIS7yJAsoD7a4k3v2eTK9loYhnG-xrnP"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">NYK</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Jalen Brunson</span>
+<span class="text-outline text-body-sm font-body-sm">NYK @ BKN • PG</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Over 25.5 PTS</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Cleared in 5 straight road games with 21+ FGA volume.
+                  </p>
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">8/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-115</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+</div>
+<!-- Card Actions Footer -->
+<div class="p-4 bg-surface-container/60 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
+<button class="px-4 py-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface border border-outline-variant font-headline-sm text-body-sm flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-base">tune</span>
+<span>Customize Legs</span>
+</button>
+<button class="px-5 py-2.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary-fixed font-headline-sm text-headline-sm font-bold flex items-center gap-2 cyan-glow transition-all active:scale-95">
+<span class="material-symbols-outlined text-lg font-bold">bolt</span>
+<span>Open in Sportsbook via QuickPick</span>
+</button>
+</div>
+</article>
+<!-- CARD 3: THE ELEMENTS UNDERDOGS (Severe Weather Special) -->
+<article class="bg-surface-container-low border border-outline-variant rounded-xl overflow-hidden shadow-lg transition-all hover:border-outline">
+<!-- Severe Winter Storm Alert Banner -->
+<div class="bg-[#f59e0b]/15 border-b border-[#f59e0b]/30 px-5 py-2.5 flex items-center justify-between">
+<div class="flex items-center gap-2 text-[#f59e0b] font-headline-sm text-body-sm font-bold">
+<span class="material-symbols-outlined text-base">ac_unit</span>
+<span>❄️ Lake Effect Snow &amp; 28mph Sustained Wind Gusts</span>
+</div>
+<span class="font-data-mono-sm text-xs text-[#f59e0b] font-semibold tracking-wider uppercase">Highmark Stadium Impact</span>
+</div>
+<!-- Card Header Bar -->
+<div class="p-5 border-b border-outline-variant bg-surface-container flex flex-wrap items-center justify-between gap-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest border border-primary/40 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl">air</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<h2 class="font-headline-lg text-headline-lg font-bold text-on-surface tracking-tight">The Elements Underdogs</h2>
+<span class="px-2 py-0.5 bg-surface-container-high text-on-surface-variant rounded text-[11px] font-data-mono-sm">#PRESET-NFL-09</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">NFL Rushing &amp; Unders • 3 Legs</p>
+</div>
+</div>
+<!-- Big Odds Badge & EV Pill -->
+<div class="flex items-center gap-3">
+<div class="px-2.5 py-1 rounded bg-tertiary/10 border border-tertiary/40 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-tertiary text-sm">verified_user</span>
+<span class="font-data-mono-md text-data-mono-md text-tertiary font-bold">+5.6% EV</span>
+</div>
+<div class="px-3.5 py-1.5 rounded-lg bg-surface-container-lowest border-2 border-primary text-primary font-data-mono-lg text-data-mono-lg font-bold shadow-[0_0_14px_rgba(6,182,212,0.3)]">
+                +540
+              </div>
+</div>
+</div>
+<!-- 3 Legs Breakdown List -->
+<div class="divide-y divide-outline-variant">
+<!-- Leg 1: Josh Allen -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="Rugged photographic portrait of quarterback Josh Allen in snowy outdoor game conditions with breath visible and high intensity focus in cold blue stadium lighting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCJESSQKVL0Qhl9kcjRNTNIzKIFpR9u1jjJNZolT7-oOBc_OYWKzhBbMXxlPSVB_oGLjGW-zb-FhOo22tQySWskSU3CcQGsoekVcabYBkzfP_-_edHCeYvemOxCxfREKmokmylgbAwPJ_xAKMV_P_OwgyHlLLcXL_UV3uBr70Ux_et_JUyMZdMmAG8oiEyn7AxvhEFiek9H-qc0o9BOsB1FxpcurES7XDRpEUX5wO2tuMT5vxfLgqAehlvPSQ0GXI4IrC4hMHOtd8lU"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">BUF</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Josh Allen</span>
+<span class="text-outline text-body-sm font-body-sm">BUF vs KC • QB</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Over 44.5 Rushing Yards</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Designed QB scrambles spike by 45% in sub-freezing precipitation games.
+                  </p>
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">8/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-115</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 2: Bills vs Chiefs Total Under -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="w-12 h-12 rounded-lg bg-surface-container-lowest border border-outline-variant flex items-center justify-center text-primary font-data-mono-md">
+<span class="material-symbols-outlined text-2xl">cyclone</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Bills vs Chiefs Game Total</span>
+<span class="text-outline text-body-sm font-body-sm">BUF @ Highmark</span>
+<span class="px-2 py-0.5 bg-secondary/15 border border-secondary/40 rounded text-secondary text-xs font-data-mono-sm font-bold">Under 41.5 Total Points</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    High wind reduces pass EPA/play to -0.18; run-heavy clock bleed.
+                  </p>
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="text-[11px] font-data-mono-sm text-tertiary font-bold ml-1">9/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-110</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<!-- Leg 3: Isiah Pacheco -->
+<div class="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-surface-container/40 transition-colors">
+<div class="flex items-start gap-3.5">
+<div class="relative">
+<img class="w-12 h-12 rounded-lg object-cover border border-outline-variant" data-alt="High intensity football portrait of running back Isiah Pacheco with determined game day gaze wearing high-contrast red practice sports gear against dark slate studio backdrop." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBOddBO73wltNYYl6RkDT9B1OcNKmXLS-f-ra1O6KQyKHL1j3Fx8eDQ9qfxcHBxaP3gYmeMqTFLtIVBGeCh4sFW66GE8T6GucrGwwfhDS-QDVx5CTZQvUshIQ9cIm2q8Uz0C78Qa5E2vqvYN7DFckyQY3V3r59rnQ_9kaIVxaDqhpftZkqUp-eJfjzJig__yVBJrQHFtjMxE-5d-VmVbe4NyLKBROGyt8o5cDREMCX3dGj9owJbqW7tuSyh7quvHOA93A73qJIJZKPz"/>
+<span class="absolute -bottom-1 -right-1 px-1 bg-surface-container-lowest border border-outline-variant rounded text-[10px] font-data-mono-sm text-on-surface">KC</span>
+</div>
+<div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface">Isiah Pacheco</span>
+<span class="text-outline text-body-sm font-body-sm">KC @ BUF • RB</span>
+<span class="px-2 py-0.5 bg-primary/10 border border-primary/30 rounded text-primary text-xs font-data-mono-sm font-bold">Over 62.5 Rushing Yards</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Projected 18+ carries as Chiefs lean on downhill scheme.
+                  </p>
+<div class="flex items-center gap-1.5 bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant w-fit mt-2">
+<span class="text-[11px] font-label-caps text-outline mr-1">L5:</span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-tertiary"></span>
+<span class="w-2.5 h-2.5 rounded bg-error-container"></span>
+<span class="text-[11px] font-data-mono-sm text-on-surface ml-1">7/10 L10 hit rate</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-data-mono-md text-data-mono-md text-on-surface px-3 py-1.5 rounded bg-surface-container border border-outline-variant">-112</span>
+<span class="material-symbols-outlined text-tertiary text-xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+</div>
+<!-- Card Actions Footer -->
+<div class="p-4 bg-surface-container/60 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
+<button class="px-4 py-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface border border-outline-variant font-headline-sm text-body-sm flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-base">tune</span>
+<span>Customize Legs</span>
+</button>
+<button class="px-5 py-2.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary-fixed font-headline-sm text-headline-sm font-bold flex items-center gap-2 cyan-glow transition-all active:scale-95">
+<span class="material-symbols-outlined text-lg font-bold">bolt</span>
+<span>Open in Sportsbook via QuickPick</span>
+</button>
+</div>
+</article>
+</section>
+</main>
+<!-- PERSISTENT STICKY PARLAY DRAWER (Right Rail ~380px wide) -->
+<aside class="hidden xl:flex fixed right-0 top-16 bottom-0 w-96 flex-col justify-between p-4 bg-surface-container-low border-l border-outline-variant z-30 custom-scroll overflow-y-auto">
+<div class="flex flex-col gap-4">
+<!-- Drawer Header -->
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant">
+<div>
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></span>
+<h3 class="font-headline-sm text-headline-sm font-bold text-on-surface">My Active Slip</h3>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-primary font-data-mono-sm text-xs font-bold">3 Legs</span>
+</div>
+<p class="font-body-sm text-[11px] text-outline mt-0.5">Automated Correlation Staged</p>
+</div>
+<button class="text-xs text-outline hover:text-error transition-colors flex items-center gap-1 font-body-sm">
+<span class="material-symbols-outlined text-sm">delete</span> Clear All
+          </button>
+</div>
+<!-- Live Payout Odds Hero Box -->
+<div class="bg-surface-container rounded-lg p-3.5 border border-primary/30 cyan-subtle-glow flex items-center justify-between">
+<div>
+<div class="text-[11px] font-label-caps text-on-surface-variant uppercase">Aggregated Parlay Odds</div>
+<div class="font-data-mono-lg text-2xl text-primary font-bold tracking-tight">+485</div>
+</div>
+<div class="text-right">
+<div class="text-[11px] font-label-caps text-tertiary uppercase">Potential Payout</div>
+<div class="font-data-mono-lg text-lg text-on-surface font-bold">
+              $100 → <span class="text-tertiary">$585.00</span>
+</div>
+</div>
+</div>
+<!-- Staged Legs Miniature List -->
+<div class="flex flex-col gap-2.5">
+<div class="text-[11px] font-label-caps text-outline uppercase tracking-wider">Staged Selections</div>
+<!-- Leg Item 1 -->
+<div class="p-2.5 rounded-lg bg-surface-container border-l-4 border-l-primary border border-outline-variant flex items-start justify-between gap-2">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-headline-sm text-body-sm font-bold text-on-surface">D. Henry</span>
+<span class="text-[11px] text-outline font-data-mono-sm">BAL @ PIT</span>
+</div>
+<div class="text-xs font-body-sm text-primary font-semibold">Anytime Touchdown</div>
+<div class="flex items-center gap-1.5 mt-1">
+<span class="font-data-mono-sm text-[11px] text-tertiary bg-tertiary/10 px-1.5 py-0.2 rounded">80% L10 Hit</span>
+<span class="font-data-mono-sm text-[11px] text-on-surface-variant">-135</span>
+</div>
+</div>
+<button aria-label="Remove Leg" class="text-outline hover:text-error p-1 transition-colors">
+<span class="material-symbols-outlined text-base">close</span>
+</button>
+</div>
+<!-- Leg Item 2 -->
+<div class="p-2.5 rounded-lg bg-surface-container border-l-4 border-l-primary border border-outline-variant flex items-start justify-between gap-2">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-headline-sm text-body-sm font-bold text-on-surface">C. Lamb</span>
+<span class="text-[11px] text-outline font-data-mono-sm">DAL vs PHI</span>
+</div>
+<div class="text-xs font-body-sm text-primary font-semibold">Anytime Touchdown</div>
+<div class="flex items-center gap-1.5 mt-1">
+<span class="font-data-mono-sm text-[11px] text-tertiary bg-tertiary/10 px-1.5 py-0.2 rounded">90% L10 Hit</span>
+<span class="font-data-mono-sm text-[11px] text-on-surface-variant">+115</span>
+</div>
+</div>
+<button aria-label="Remove Leg" class="text-outline hover:text-error p-1 transition-colors">
+<span class="material-symbols-outlined text-base">close</span>
+</button>
+</div>
+<!-- Leg Item 3 -->
+<div class="p-2.5 rounded-lg bg-surface-container border-l-4 border-l-primary border border-outline-variant flex items-start justify-between gap-2">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="font-headline-sm text-body-sm font-bold text-on-surface">J. Gibbs</span>
+<span class="text-[11px] text-outline font-data-mono-sm">DET vs GB</span>
+</div>
+<div class="text-xs font-body-sm text-primary font-semibold">Anytime Touchdown</div>
+<div class="flex items-center gap-1.5 mt-1">
+<span class="font-data-mono-sm text-[11px] text-tertiary bg-tertiary/10 px-1.5 py-0.2 rounded">70% L10 Hit</span>
+<span class="font-data-mono-sm text-[11px] text-on-surface-variant">-105</span>
+</div>
+</div>
+<button aria-label="Remove Leg" class="text-outline hover:text-error p-1 transition-colors">
+<span class="material-symbols-outlined text-base">close</span>
+</button>
+</div>
+</div>
+<!-- Lineshopper Price Comparison Widget -->
+<div class="bg-surface-container rounded-lg p-3 border border-outline-variant">
+<div class="flex items-center justify-between mb-2">
+<span class="font-headline-sm text-xs font-bold text-on-surface flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-primary">compare_arrows</span>
+              Lineshopper Odds Comparison
+            </span>
+<span class="text-[10px] text-tertiary font-data-mono-sm font-semibold">LIVE</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<!-- FanDuel (Best Value) -->
+<div class="p-2 rounded bg-surface-container-lowest border border-tertiary/60 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded bg-[#10b981]/20 text-tertiary font-bold text-[10px] flex items-center justify-center">FD</span>
+<span class="text-xs font-headline-sm font-bold text-on-surface">FanDuel</span>
+<span class="px-1.5 py-0.5 rounded bg-tertiary/15 text-tertiary text-[9px] font-data-mono-sm font-bold">Best Value ⭐</span>
+</div>
+<div class="text-right">
+<span class="font-data-mono-md text-data-mono-md text-tertiary font-bold">+485</span>
+<span class="text-[10px] text-tertiary block font-data-mono-sm">+$55 Edge</span>
+</div>
+</div>
+<!-- DraftKings -->
+<div class="p-2 rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded bg-surface-variant text-on-surface font-bold text-[10px] flex items-center justify-center">DK</span>
+<span class="text-xs font-body-sm text-on-surface">DraftKings</span>
+</div>
+<span class="font-data-mono-md text-data-mono-md text-on-surface font-semibold">+430</span>
+</div>
+<!-- BetMGM -->
+<div class="p-2 rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded bg-surface-variant text-on-surface font-bold text-[10px] flex items-center justify-center">MG</span>
+<span class="text-xs font-body-sm text-on-surface">BetMGM</span>
+</div>
+<span class="font-data-mono-md text-data-mono-md text-on-surface-variant font-semibold">+410</span>
+</div>
+<!-- Caesars -->
+<div class="p-2 rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-5 h-5 rounded bg-surface-variant text-on-surface font-bold text-[10px] flex items-center justify-center">CZ</span>
+<span class="text-xs font-body-sm text-on-surface">Caesars</span>
+</div>
+<span class="font-data-mono-md text-data-mono-md text-on-surface-variant font-semibold">+405</span>
+</div>
+</div>
+</div>
+<!-- Stake Quick Buttons & Custom Input -->
+<div class="bg-surface-container rounded-lg p-3 border border-outline-variant">
+<div class="flex items-center justify-between mb-2">
+<span class="text-[11px] font-label-caps text-outline uppercase">Wager Stake Amount</span>
+<span class="font-data-mono-sm text-xs text-primary">Balance: $1,420.50</span>
+</div>
+<!-- Quick Selector Buttons -->
+<div class="grid grid-cols-4 gap-1.5 mb-2">
+<button class="py-1 rounded bg-surface-container-low border border-outline-variant hover:border-primary text-xs font-data-mono-sm text-on-surface transition-colors">$10</button>
+<button class="py-1 rounded bg-surface-container-low border border-outline-variant hover:border-primary text-xs font-data-mono-sm text-on-surface transition-colors">$25</button>
+<button class="py-1 rounded bg-surface-container-low border border-outline-variant hover:border-primary text-xs font-data-mono-sm text-on-surface transition-colors">$50</button>
+<button class="py-1 rounded bg-primary/20 border border-primary text-xs font-data-mono-sm text-primary font-bold">$100</button>
+</div>
+<!-- Custom Stake Input -->
+<div class="relative flex items-center">
+<span class="absolute left-3 font-data-mono-lg text-lg text-outline">$</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-7 pr-3 py-1.5 font-data-mono-lg text-lg text-on-surface font-bold focus:border-primary focus:ring-0" type="text" value="100.00"/>
+<span class="absolute right-3 font-data-mono-sm text-xs text-outline">USD</span>
+</div>
+</div>
+</div>
+<!-- Persistent Drawer Bottom Launch CTA -->
+<div class="pt-3 border-t border-outline-variant flex flex-col gap-2 mt-4">
+<!-- 1-Tap Launch Button -->
+<button class="w-full py-3 px-4 rounded-lg bg-gradient-to-r from-primary to-[#06b6d4] hover:from-primary-fixed-dim hover:to-primary text-on-primary-fixed font-headline-sm text-headline-sm font-bold flex items-center justify-center gap-2 cyan-glow transition-all active:scale-95 shadow-xl">
+<span class="material-symbols-outlined text-xl font-bold">bolt</span>
+<span>1-Tap Launch via QuickPick</span>
+</button>
+<!-- Brand Sync Badges -->
+<div class="flex items-center justify-center gap-3 py-1">
+<span class="text-[10px] text-outline font-label-caps uppercase">Supported Books:</span>
+<span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-headline-sm text-on-surface-variant">FanDuel</span>
+<span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-headline-sm text-on-surface-variant">DraftKings</span>
+<span class="px-2 py-0.5 bg-surface-container rounded text-[10px] font-headline-sm text-on-surface-variant">BetMGM</span>
+</div>
+<p class="font-body-sm text-[10px] text-outline text-center leading-tight">
+          Odds calculated live via Official Data Feeds • Responsible Gaming 21+ • Gambling Problem? Call 1-800-GAMBLER.
+        </p>
+</div>
+</aside>
+</div>
+<!-- MOBILE SLIP EXPANDABLE BOTTOM BAR (Visible only on screens < 1280px) -->
+<div class="xl:hidden fixed bottom-0 left-0 right-0 p-3 bg-surface-container-low border-t border-outline-variant z-50 flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md">
+<div class="flex items-center gap-3">
+<div class="px-2.5 py-1 rounded bg-surface-container border border-primary text-primary font-data-mono-md font-bold">
+        +485
+      </div>
+<div>
+<div class="font-headline-sm text-body-sm font-bold text-on-surface">Active Slip (3 Legs)</div>
+<div class="text-[11px] text-tertiary font-data-mono-sm">$100 → $585.00</div>
+</div>
+</div>
+<button class="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary-fixed font-headline-sm text-body-sm font-bold flex items-center gap-1.5 cyan-glow active:scale-95">
+<span class="material-symbols-outlined text-base">bolt</span>
+<span>QuickPick Launch</span>
+</button>
+</div>
+<!-- INTERACTIVE CLIENT MICRO-BEHAVIORS -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Stake input reactive mock
+      const stakeInput = document.querySelector('input[value="100.00"]');
+      const payoutElement = document.querySelector('.text-tertiary\\:\\$585\\.00') || document.querySelector('span.text-tertiary');
+
+      if (stakeInput) {
+        stakeInput.addEventListener('input', (e) => {
+          const val = parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0;
+          const calculated = (val * 5.85).toFixed(2);
+          if (payoutElement) {
+            payoutElement.textContent = `$${calculated}`;
+          }
+        });
+      }
+
+      // Quick stake buttons mock
+      const stakeButtons = document.querySelectorAll('button:has(+ button), .grid-cols-4 button');
+      stakeButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const txt = btn.textContent.replace('$', '').trim();
+          if (stakeInput && !isNaN(txt)) {
+            stakeInput.value = parseFloat(txt).toFixed(2);
+            stakeInput.dispatchEvent(new Event('input'));
+          }
+        });
+      });
+    });
+  </script>
+</body></html>

@@ -1,0 +1,11 @@
+{
+  "bmad-loop": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "C:/Users/llade/AppData/Roaming/uv/tools/bmad-loop/Scripts/bmad-loop.exe relay Stop",
+        "timeout": 60
+      }
+    ]
+  }
+}

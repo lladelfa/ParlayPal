@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --font-space-grotesk: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-outfit: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-jetbrains-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Dark Surface Hierarchy */
+  --surface-canvas: #0a0e17;
+  --surface-module: #0f131c;
+  --surface-card: #121b2d;
+  --border-hairline: #1e293b;
+
+  /* Typography Contrast */
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+
+  /* Semantic Neon Accents */
+  --accent-cyan: #06b6d4;
+  --accent-violet: #6366f1;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+}
+
+@theme inline {
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-module: var(--surface-module);
+  --color-surface-card: var(--surface-card);
+  --color-border-hairline: var(--border-hairline);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-emerald: var(--accent-emerald);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-rose: var(--accent-rose);
+
+  --font-display: var(--font-space-grotesk);
+  --font-sans: var(--font-outfit);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+body {
+  background-color: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-outfit);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-telemetry {
+  font-family: var(--font-jetbrains-mono);
+  font-variant-numeric: tabular-nums;
+}
