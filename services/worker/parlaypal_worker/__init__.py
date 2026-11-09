@@ -14,6 +14,24 @@ from parlaypal_worker.devig import (
     evaluate_two_way_prop,
     process_and_publish_ev_props,
 )
+from parlaypal_worker.hit_rate import (
+    HitRateError,
+    PlayerGameStat,
+    PropHitRateResult,
+    compute_rolling_hit_rate,
+    format_hit_rate_string,
+    generate_sofascore_form_dots,
+    update_props_hit_rates,
+)
+from parlaypal_worker.weather import (
+    StadiumWeatherAssessment,
+    StadiumWeatherForecast,
+    WeatherBadgeSeverity,
+    WeatherBadgeType,
+    WeatherContextBadge,
+    evaluate_stadium_weather,
+    ingest_events_weather,
+)
 
 __version__ = "0.1.0"
 
@@ -21,14 +39,28 @@ __all__ = [
     "BatchDevigResult",
     "DeviggingError",
     "EvaluatedPropRecord",
+    "HitRateError",
+    "PlayerGameStat",
     "PropDevigResult",
+    "PropHitRateResult",
+    "StadiumWeatherAssessment",
+    "StadiumWeatherForecast",
     "TwoWayPropMarketInput",
+    "WeatherBadgeSeverity",
+    "WeatherBadgeType",
+    "WeatherContextBadge",
     "__version__",
     "american_to_decimal",
     "combine_independent_fair_probabilities",
+    "compute_rolling_hit_rate",
     "decimal_to_american",
     "devig_multiplicative",
     "devig_power",
+    "evaluate_stadium_weather",
     "evaluate_two_way_prop",
+    "format_hit_rate_string",
+    "generate_sofascore_form_dots",
+    "ingest_events_weather",
     "process_and_publish_ev_props",
+    "update_props_hit_rates",
 ]

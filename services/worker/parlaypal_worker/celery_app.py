@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -107,5 +107,94 @@ def evaluate_prop_markets(
                 close_session_fn()
         if owns_redis:
             close_fn = getattr(client, "close", None)
+            if callable(close_fn):
+                close_fn()
+
+
+@celery_app.task(name="parlaypal_worker.sync_player_hit_rates")
+def sync_player_hit_rates(
+    player_game_logs: Mapping[str, Sequence[Any]],
+    *,
+    session: Session | None = None,
+) -> dict[str, Any]:
+    """Compute and persist rolling hit rates for player props."""
+    from parlaypal_worker.hit_rate import update_props_hit_rates
+
+    owns_session = session is None
+    active_session = session if session is not None else create_session_factory()()
+    try:
+        updated = update_props_hit_rates(active_session, player_game_logs)
+        return {"status": "ok", "updated_props": updated}
+    finally:
+        if owns_session:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
+
+
+@celery_app.task(name="parlaypal_worker.sync_event_weather")
+def sync_event_weather(
+    weather_data: Sequence[dict[str, Any]],
+    *,
+    session: Session | None = None,
+    redis_client: RedisLike | None = None,
+) -> dict[str, Any]:
+    """Ingest and persist weather telemetry for outdoor stadiums."""
+    from parlaypal_worker.weather import ingest_events_weather
+
+    owns_session = session is None
+    owns_redis = redis_client is None
+    active_session = session if session is not None else create_session_factory()()
+    active_redis = redis_client if redis_client is not None else get_redis_client()
+    try:
+        updated = ingest_events_weather(active_session, weather_data, redis_client=active_redis)
+        return {"status": "ok", "updated_events": updated}
+    finally:
+        if owns_session:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
+        if owns_redis:
+            close_fn = getattr(active_redis, "close", None)
+            if callable(close_fn):
+                close_fn()
+
+
+@celery_app.task(name="parlaypal_worker.sync_weather_and_hit_rates")
+def sync_weather_and_hit_rates(
+    payload: dict[str, Any],
+    *,
+    session: Session | None = None,
+    redis_client: RedisLike | None = None,
+) -> dict[str, Any]:
+    """Coordinate both hit-rate and weather synchronization in a single batch pass."""
+    from parlaypal_worker.hit_rate import update_props_hit_rates
+    from parlaypal_worker.weather import ingest_events_weather
+
+    owns_session = session is None
+    owns_redis = redis_client is None
+    active_session = session if session is not None else create_session_factory()()
+    active_redis = redis_client if redis_client is not None else get_redis_client()
+    try:
+        updated_props = 0
+        updated_events = 0
+        if "player_game_logs" in payload and payload["player_game_logs"]:
+            updated_props = update_props_hit_rates(active_session, payload["player_game_logs"])
+        if "weather_data" in payload and payload["weather_data"]:
+            updated_events = ingest_events_weather(
+                active_session, payload["weather_data"], redis_client=active_redis
+            )
+        return {
+            "status": "ok",
+            "updated_props": updated_props,
+            "updated_events": updated_events,
+        }
+    finally:
+        if owns_session:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
+        if owns_redis:
+            close_fn = getattr(active_redis, "close", None)
             if callable(close_fn):
                 close_fn()
