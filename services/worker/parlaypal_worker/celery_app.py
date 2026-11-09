@@ -198,3 +198,58 @@ def sync_weather_and_hit_rates(
             close_fn = getattr(active_redis, "close", None)
             if callable(close_fn):
                 close_fn()
+
+
+@celery_app.task(name="parlaypal_worker.sync_preset_parlay_feed")
+def sync_preset_parlay_feed(
+    *,
+    session: Session | None = None,
+    redis_client: RedisLike | None = None,
+    target_count: int = 3,
+) -> dict[str, Any]:
+    """Generate curated preset parlay cards from database and sync to Redis."""
+    from sqlalchemy import select
+
+    from parlaypal_worker.models import Event, PlayerProp, Team
+    from parlaypal_worker.presets import generate_curated_presets, sync_preset_feed_to_redis
+
+    owns_session = session is None
+    owns_redis = redis_client is None
+    active_session = session if session is not None else create_session_factory()()
+    active_redis = redis_client if redis_client is not None else get_redis_client()
+    try:
+        now_utc = datetime.now(UTC)
+        props_stmt = select(PlayerProp).where(PlayerProp.status == "ACTIVE")
+        props = list(active_session.scalars(props_stmt).all())
+
+        events_stmt = select(Event).where(Event.commence_time > now_utc)
+        events = list(active_session.scalars(events_stmt).all())
+        events_map = {e.event_id: e for e in events}
+
+        teams_stmt = select(Team)
+        teams = list(active_session.scalars(teams_stmt).all())
+        teams_map = {t.team_id: t for t in teams}
+
+        feed = generate_curated_presets(
+            props=props,
+            events_map=events_map,
+            teams_map=teams_map,
+            target_count=target_count,
+            now_utc=now_utc,
+        )
+
+        sync_preset_feed_to_redis(feed, active_redis, ttl_seconds=45)
+        return {
+            "status": "ok",
+            "presets_generated": len(feed.cards),
+            "generated_at": format_iso8601_utc(feed.generated_at),
+        }
+    finally:
+        if owns_session:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
+        if owns_redis:
+            close_fn = getattr(active_redis, "close", None)
+            if callable(close_fn):
+                close_fn()

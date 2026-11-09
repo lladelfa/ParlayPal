@@ -47,7 +47,7 @@ development_status:
   1-1-project-ingestion-data-substrate-setup: done
   1-2-quantitative-devigging-outlier-guard-engine: done
   1-3-rolling-consistency-hit-rate-weather-ingestion-engine: done
-  1-4-curated-preset-parlay-feed-with-conviction-micro-copy: backlog
+  1-4-curated-preset-parlay-feed-with-conviction-micro-copy: review
   epic-1-retrospective: optional
 
   epic-2: backlog

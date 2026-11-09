@@ -34,6 +34,16 @@ export function oddsFeedChannel(sportKey: string): string {
   return `odds:feed:${sportKey}`;
 }
 
+export function presetsFeedKey(sportKey?: string): string {
+  if (sportKey && sportKey.toLowerCase().includes("nfl")) {
+    return "presets:feed:nfl";
+  }
+  if (sportKey && sportKey.toLowerCase().includes("nba")) {
+    return "presets:feed:nba";
+  }
+  return "presets:feed:all";
+}
+
 export function formatIso8601Utc(date: Date = new Date()): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -75,4 +85,33 @@ export function setRedisSubscriberFactory(
   factory: RedisSubscriberFactory | null,
 ): void {
   activeSubscriberFactory = factory ?? defaultSubscriberFactory;
+}
+
+export interface RedisClient {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
+  quit(): Promise<unknown>;
+  disconnect(): void;
+}
+
+export type RedisClientFactory = () => RedisClient;
+
+function defaultClientFactory(): RedisClient {
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379/0";
+  return new Redis(redisUrl, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    retryStrategy: () => null,
+  });
+}
+
+let activeClientFactory: RedisClientFactory = defaultClientFactory;
+
+export function createRedisClient(): RedisClient {
+  return activeClientFactory();
+}
+
+export function setRedisClientFactory(factory: RedisClientFactory | null): void {
+  activeClientFactory = factory ?? defaultClientFactory;
 }
