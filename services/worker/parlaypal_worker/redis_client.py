@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import lru_cache
 import json
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, Sequence
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 import redis
 
 from parlaypal_worker.config import SUPPORTED_SPORT_KEYS, get_settings
@@ -16,6 +17,10 @@ from parlaypal_worker.config import SUPPORTED_SPORT_KEYS, get_settings
 HOT_CACHE_TTL_SECONDS: int = 45
 MIN_DECIMAL_ODDS: Decimal = Decimal("1.01")
 MAX_DECIMAL_ODDS: Decimal = Decimal("9999.9999")
+POSITIVE_EV_MIN_THRESHOLD: Decimal = Decimal("0.01500")
+HIGH_VALUE_MIN_EV_THRESHOLD: Decimal = Decimal("0.03500")
+HIGH_VALUE_MIN_HIT_RATE: Decimal = Decimal("0.7000")
+OUTLIER_GUARD_MAX_EV: Decimal = Decimal("0.10000")
 
 
 class RedisLike(Protocol):
@@ -151,10 +156,165 @@ class OddsDeltaFrame(BaseModel):
         return format_iso8601_utc(value)
 
 
-def get_redis_client(redis_url: str | None = None) -> redis.Redis:
-    """Create a Redis 7.2 client decoded to UTF-8 strings."""
+class EvaluatedPropFeedItem(BaseModel):
+    """Validated non-outlier positive-EV player prop item for `ev:feed:{sport_key}`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prop_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    event_id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    external_provider_id: str
+    sport_key: str
+    player_name: str
+    market_key: str
+    selection: str = "OVER"
+    line_value: Decimal | None = Field(default=None, allow_inf_nan=False)
+    offered_decimal_odds: Decimal = Field(
+        ...,
+        ge=MIN_DECIMAL_ODDS,
+        le=MAX_DECIMAL_ODDS,
+        allow_inf_nan=False,
+    )
+    sharp_decimal_odds: Decimal = Field(
+        ...,
+        ge=MIN_DECIMAL_ODDS,
+        le=MAX_DECIMAL_ODDS,
+        allow_inf_nan=False,
+    )
+    opposite_sharp_decimal_odds: Decimal | None = Field(
+        default=None,
+        ge=MIN_DECIMAL_ODDS,
+        le=MAX_DECIMAL_ODDS,
+        allow_inf_nan=False,
+    )
+    offered_american_odds: int | None = None
+    sharp_american_odds: int | None = None
+    fair_probability_mult: Decimal | None = Field(
+        default=None,
+        gt=Decimal("0"),
+        lt=Decimal("1"),
+        allow_inf_nan=False,
+    )
+    fair_probability_power: Decimal | None = Field(
+        default=None,
+        gt=Decimal("0"),
+        lt=Decimal("1"),
+        allow_inf_nan=False,
+    )
+    fair_probability: Decimal = Field(
+        ...,
+        gt=Decimal("0"),
+        lt=Decimal("1"),
+        allow_inf_nan=False,
+    )
+    guarded_ev: Decimal = Field(
+        ...,
+        ge=POSITIVE_EV_MIN_THRESHOLD,
+        le=OUTLIER_GUARD_MAX_EV,
+        allow_inf_nan=False,
+    )
+    hit_rate_l10: Decimal | None = Field(
+        default=None,
+        ge=Decimal("0"),
+        le=Decimal("1"),
+        allow_inf_nan=False,
+    )
+    status: Literal["ACTIVE"] = "ACTIVE"
+    value_tier: Literal["POSITIVE_VALUE", "HIGH_VALUE"] = "POSITIVE_VALUE"
+    is_positive_ev: bool = True
+    is_high_value: bool = False
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("external_provider_id")
+    @classmethod
+    def check_provider_prefix(cls, value: str) -> str:
+        return _validate_provider_prefix(value)
+
+    @field_validator("sport_key")
+    @classmethod
+    def check_sport_key(cls, value: str) -> str:
+        return _validate_sport_key(value)
+
+    @model_validator(mode="after")
+    def enforce_public_feed_invariants(self) -> EvaluatedPropFeedItem:
+        if self.status != "ACTIVE" or not self.is_positive_ev:
+            raise ValueError("Only ACTIVE positive-EV props may be cached in ev:feed.")
+        if self.guarded_ev < POSITIVE_EV_MIN_THRESHOLD:
+            raise ValueError("Sub-threshold props with guarded_ev < 1.5% cannot be cached in ev:feed.")
+        if self.guarded_ev > OUTLIER_GUARD_MAX_EV:
+            raise ValueError("Outlier props with guarded_ev > 10.0% cannot be cached in ev:feed.")
+
+        qualifies_high_value = (
+            self.guarded_ev >= HIGH_VALUE_MIN_EV_THRESHOLD
+            and self.hit_rate_l10 is not None
+            and self.hit_rate_l10 >= HIGH_VALUE_MIN_HIT_RATE
+        )
+        if self.is_high_value != (self.value_tier == "HIGH_VALUE"):
+            raise ValueError("is_high_value must match value_tier == 'HIGH_VALUE'.")
+        if self.is_high_value and not qualifies_high_value:
+            raise ValueError(
+                "HIGH_VALUE requires guarded_ev >= 0.03500 and hit_rate_l10 >= 0.7000."
+            )
+        if not self.is_high_value and qualifies_high_value:
+            raise ValueError(
+                "Props with guarded_ev >= 0.03500 and hit_rate_l10 >= 0.7000 must be HIGH_VALUE."
+            )
+        return self
+
+    @field_serializer(
+        "offered_decimal_odds",
+        "sharp_decimal_odds",
+        "opposite_sharp_decimal_odds",
+    )
+    def serialize_odds(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)}"
+
+    @field_serializer(
+        "fair_probability_mult",
+        "fair_probability_power",
+        "fair_probability",
+        "guarded_ev",
+    )
+    def serialize_quant_metrics(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value.quantize(Decimal('0.00001'), rounding=ROUND_HALF_UP)}"
+
+    @field_serializer("hit_rate_l10")
+    def serialize_hit_rate(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)}"
+
+    @field_serializer("line_value")
+    def serialize_line_value(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}"
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, value: datetime) -> str:
+        return format_iso8601_utc(value)
+
+
+@lru_cache(maxsize=8)
+def _build_redis_pool(resolved_url: str) -> redis.ConnectionPool:
+    """Create and cache a synchronous Redis connection pool per URL."""
+    return redis.ConnectionPool.from_url(resolved_url, decode_responses=True)
+
+
+def get_redis_pool(redis_url: str | None = None) -> redis.ConnectionPool:
+    """Return a shared Redis 7.2 ConnectionPool decoded to UTF-8 strings."""
     resolved_url = redis_url or get_settings().redis_url
-    return redis.Redis.from_url(resolved_url, decode_responses=True)
+    return _build_redis_pool(resolved_url)
+
+
+def get_redis_client(redis_url: str | None = None) -> redis.Redis:
+    """Create a Redis 7.2 client backed by the shared connection pool."""
+    pool = get_redis_pool(redis_url)
+    return redis.Redis(connection_pool=pool)
 
 
 def publish_odds_delta(
@@ -183,16 +343,74 @@ def publish_odds_delta(
 def cache_ev_feed(
     client: RedisLike,
     sport_key: str,
-    feed_items: list[dict[str, Any]],
+    feed_items: Sequence[EvaluatedPropFeedItem | dict[str, Any]],
     *,
     ttl_seconds: int = HOT_CACHE_TTL_SECONDS,
 ) -> str:
-    """Cache +EV feed snapshot at `ev:feed:{sport_key}` with strict 45-second TTL."""
+    """Cache +EV feed snapshot at `ev:feed:{sport_key}` with strict 45-second TTL.
+
+    Rejects any item stamped `SUSPECT_STALE_LINE` or with `guarded_ev > 10.0%`.
+    """
     validated_sport_key = _validate_sport_key(sport_key)
+    normalized_items: list[dict[str, Any]] = []
+    for item in feed_items:
+        if isinstance(item, EvaluatedPropFeedItem):
+            if item.sport_key != validated_sport_key:
+                raise ValueError(
+                    f"Feed item sport_key '{item.sport_key}' does not match '{validated_sport_key}'."
+                )
+            normalized_items.append(item.model_dump(mode="json"))
+        elif isinstance(item, dict):
+            item_sport_key = item.get("sport_key")
+            if item_sport_key is not None and _validate_sport_key(str(item_sport_key)) != validated_sport_key:
+                raise ValueError(
+                    f"Feed item sport_key '{item_sport_key}' does not match '{validated_sport_key}'."
+                )
+            status_val = item.get("status")
+            if status_val is not None and status_val != "ACTIVE":
+                raise ValueError(f"Cannot publish non-ACTIVE market (status={status_val!r}) to ev:feed.")
+            tier_val = item.get("value_tier")
+            if tier_val is not None and tier_val not in ("POSITIVE_VALUE", "HIGH_VALUE"):
+                raise ValueError(f"Cannot publish market with value_tier={tier_val!r} to ev:feed.")
+            if item.get("is_positive_ev") is False:
+                raise ValueError("Cannot publish market with is_positive_ev=False to ev:feed.")
+
+            raw_ev = item.get("guarded_ev", item.get("ev"))
+            if raw_ev is not None:
+                if isinstance(raw_ev, bool):
+                    raise ValueError("Invalid boolean EV value in ev:feed item.")
+                try:
+                    ev_dec = raw_ev if isinstance(raw_ev, Decimal) else Decimal(str(raw_ev).strip())
+                except (InvalidOperation, ValueError, TypeError) as exc:
+                    raise ValueError(f"Invalid EV value '{raw_ev}' in ev:feed item.") from exc
+                if not ev_dec.is_finite():
+                    raise ValueError("Non-finite EV value is not permitted in ev:feed.")
+                if ev_dec > OUTLIER_GUARD_MAX_EV:
+                    raise ValueError("Cannot publish market with EV > 10.0% to ev:feed.")
+                if ev_dec < POSITIVE_EV_MIN_THRESHOLD:
+                    raise ValueError("Cannot publish sub-threshold market with EV < 1.5% to ev:feed.")
+
+            if {
+                "external_provider_id",
+                "player_name",
+                "market_key",
+                "offered_decimal_odds",
+                "sharp_decimal_odds",
+                "fair_probability",
+                "guarded_ev",
+            }.issubset(item.keys()):
+                item_payload = {**item, "sport_key": validated_sport_key}
+                validated_item = EvaluatedPropFeedItem.model_validate(item_payload)
+                normalized_items.append(validated_item.model_dump(mode="json"))
+            else:
+                normalized_items.append(item)
+        else:
+            raise TypeError(f"Unsupported feed item type: {type(item)!r}")
+
     envelope = {
         "sport_key": validated_sport_key,
         "updated_at": format_iso8601_utc(datetime.now(timezone.utc)),
-        "items": feed_items,
+        "items": normalized_items,
     }
     serialized = json.dumps(envelope, default=str)
     client.set(ev_feed_key(validated_sport_key), serialized, ex=ttl_seconds)
