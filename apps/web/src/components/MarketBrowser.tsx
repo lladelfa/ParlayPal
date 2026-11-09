@@ -13,6 +13,7 @@ import {
   filterMarketProps,
   recalculateMarketPropRow,
 } from "@/lib/market-filters";
+import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 
 interface MarketBrowserProps {
   initialFeed: MarketBrowserFeedType;
@@ -26,6 +27,13 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sseConnected, setSseConnected] = useState(false);
   const [lastTickTime, setLastTickTime] = useState<string | null>(null);
+
+  const { slip, addMarketProp, setCandidatePool } = useParlayDrawer();
+
+  // Sync candidate pool to ParlayDrawerContext so leg swapper can surface alternatives
+  useEffect(() => {
+    setCandidatePool(props);
+  }, [props, setCandidatePool]);
 
   // When sport changes, reset market to "all" if current market is not valid for selected sport
   const handleSportChange = (newSport: SportFilter) => {
@@ -139,6 +147,8 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
               label: `NBA ${v}`,
             })),
           ];
+
+  const slipPropIds = new Set(slip.legs.map((l) => l.propId));
 
   return (
     <div className="flex flex-col gap-6">
@@ -303,7 +313,12 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
         ) : (
           <div className="divide-y divide-border-hairline/60">
             {visibleProps.map((prop) => (
-              <MarketPropRowItem key={prop.propId} prop={prop} />
+              <MarketPropRowItem
+                key={prop.propId}
+                prop={prop}
+                isInSlip={slipPropIds.has(prop.propId)}
+                onAddToSlip={() => addMarketProp(prop)}
+              />
             ))}
           </div>
         )}
@@ -312,7 +327,15 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   );
 }
 
-function MarketPropRowItem({ prop }: { prop: MarketPropRow }) {
+function MarketPropRowItem({
+  prop,
+  isInSlip,
+  onAddToSlip,
+}: {
+  prop: MarketPropRow;
+  isInSlip: boolean;
+  onAddToSlip: () => void;
+}) {
   const evPct = (parseFloat(prop.guardedEv) * 100).toFixed(1);
   const isPositiveEv = parseFloat(prop.guardedEv) > 0;
   const formattedOdds =
@@ -383,7 +406,7 @@ function MarketPropRowItem({ prop }: { prop: MarketPropRow }) {
         </div>
       </div>
 
-      {/* Right: Odds, EV, Hybrid Score */}
+      {/* Right: Odds, EV, Hybrid Score, & Add to Slip */}
       <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-center">
         {/* Guarded EV */}
         <span
@@ -410,6 +433,25 @@ function MarketPropRowItem({ prop }: { prop: MarketPropRow }) {
             {prop.hybridValueScore}
           </span>
         </div>
+
+        {/* Add to Slip / In Slip Action Button */}
+        {isInSlip ? (
+          <button
+            type="button"
+            disabled
+            className="rounded-lg bg-surface-module px-3.5 py-2 font-sans text-xs font-semibold text-accent-emerald border border-accent-emerald/30 cursor-default"
+          >
+            ✓ In Slip
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onAddToSlip}
+            className="rounded-lg bg-surface-module px-3.5 py-2 font-sans text-xs font-semibold text-accent-cyan hover:bg-accent-cyan hover:text-surface-canvas border border-border-hairline transition-all cursor-pointer shadow-sm active:scale-95"
+          >
+            + Add to Slip
+          </button>
+        )}
       </div>
     </div>
   );

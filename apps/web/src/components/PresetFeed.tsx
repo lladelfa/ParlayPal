@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import type { PresetCard as PresetCardType } from "@/types/preset";
 import { recalculatePresetCard } from "@/lib/math";
+import { classifyDateWindow, presetLegToParlayLeg } from "@/lib/parlay";
+import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 import { PresetCard } from "./PresetCard";
 
 interface PresetFeedProps {
@@ -14,6 +16,7 @@ export function PresetFeed({ initialCards }: PresetFeedProps) {
   const [activeSportFilter, setActiveSportFilter] = useState<"all" | "nfl" | "nba">("all");
   const [sseConnected, setSseConnected] = useState(false);
   const [lastTickTime, setLastTickTime] = useState<string | null>(null);
+  const { loadPresetLegs } = useParlayDrawer();
 
   // Filter cards by sport
   const filteredCards = cards.filter((card) => {
@@ -134,7 +137,17 @@ export function PresetFeed({ initialCards }: PresetFeedProps) {
       {/* Preset Cards Grid */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
         {filteredCards.map((card) => (
-          <PresetCard key={card.presetId} card={card} />
+          <PresetCard
+            key={card.presetId}
+            card={card}
+            onCustomize={(c) => {
+              const dateWindow = classifyDateWindow(c.commenceTime);
+              const legs = c.legs.map((l) =>
+                presetLegToParlayLeg(l, c.sportKey, dateWindow),
+              );
+              loadPresetLegs(legs);
+            }}
+          />
         ))}
       </div>
     </div>
