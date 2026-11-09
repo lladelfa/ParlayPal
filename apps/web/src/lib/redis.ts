@@ -34,6 +34,16 @@ export function oddsFeedChannel(sportKey: string): string {
   return `odds:feed:${sportKey}`;
 }
 
+export function marketsBrowserKey(sportKey?: string): string {
+  if (sportKey && sportKey.toLowerCase().includes("nfl")) {
+    return "markets:browser:nfl";
+  }
+  if (sportKey && sportKey.toLowerCase().includes("nba")) {
+    return "markets:browser:nba";
+  }
+  return "markets:browser:all";
+}
+
 export function presetsFeedKey(sportKey?: string): string {
   if (sportKey && sportKey.toLowerCase().includes("nfl")) {
     return "presets:feed:nfl";

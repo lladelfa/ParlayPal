@@ -70,6 +70,18 @@ def odds_feed_channel(sport_key: str) -> str:
     return f"odds:feed:{sport_key}"
 
 
+def markets_browser_key(sport_key: str | None = None) -> str:
+    """Build namespaced Redis key `markets:browser:{sport_key}`."""
+    if not sport_key or sport_key.strip().lower() in ("all", "*"):
+        return "markets:browser:all"
+    cleaned = sport_key.strip().lower()
+    if "nfl" in cleaned:
+        return "markets:browser:nfl"
+    if "nba" in cleaned:
+        return "markets:browser:nba"
+    return f"markets:browser:{cleaned}"
+
+
 def _validate_provider_prefix(value: str) -> str:
     stripped = value.strip()
     if (
