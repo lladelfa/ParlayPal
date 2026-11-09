@@ -343,6 +343,9 @@ export const FALLBACK_PRESET_FEED: CuratedPresetFeed = {
 export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPresetFeed> {
   try {
     const redis = createRedisClient();
+    if (typeof redis.connect === "function") {
+      await redis.connect();
+    }
     const key = presetsFeedKey(sportKey);
     const cached = await redis.get(key);
 
@@ -353,7 +356,7 @@ export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPr
       }
     }
   } catch (err) {
-    console.warn("Failed to fetch preset cards from Redis; utilizing fallback feed.", err);
+    console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback preset feed.`);
   }
 
   if (sportKey && sportKey.toLowerCase().includes("nfl")) {

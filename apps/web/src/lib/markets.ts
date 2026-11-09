@@ -284,6 +284,9 @@ export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
 export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBrowserFeed> {
   try {
     const redis = createRedisClient();
+    if (typeof redis.connect === "function") {
+      await redis.connect();
+    }
     const key = marketsBrowserKey(sportKey);
     const cached = await redis.get(key);
 
@@ -294,7 +297,7 @@ export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBro
       }
     }
   } catch (err) {
-    console.warn("Failed to fetch market browser feed from Redis; utilizing fallback.", err);
+    console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback market feed.`);
   }
 
   if (sportKey && sportKey.toLowerCase().includes("nfl")) {

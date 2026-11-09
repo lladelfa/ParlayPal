@@ -2,7 +2,7 @@ import { problemDetailsResponse } from "@/lib/errors";
 import {
   createRedisSubscriber,
   formatIso8601Utc,
-  isSupportedSportKey,
+  normalizeSportParam,
   oddsFeedChannel,
   SUPPORTED_SPORT_KEYS,
 } from "@/lib/redis";
@@ -12,18 +12,24 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  const sportKey = url.searchParams.get("sport_key");
+  const rawSport =
+    url.searchParams.get("sport_key") ?? url.searchParams.get("sport");
+  const sport = normalizeSportParam(rawSport);
 
-  if (!isSupportedSportKey(sportKey)) {
+  if (!sport) {
     return problemDetailsResponse(
       400,
       "INVALID_SPORT_KEY",
-      `Unsupported or missing sport_key. Expected one of: ${SUPPORTED_SPORT_KEYS.join(", ")}.`,
+      `Unsupported or missing sport_key. Expected one of: ${SUPPORTED_SPORT_KEYS.join(", ")}, or 'all'.`,
       60,
     );
   }
 
-  const channel = oddsFeedChannel(sportKey);
+  const channels =
+    sport === "all"
+      ? SUPPORTED_SPORT_KEYS.map((k) => oddsFeedChannel(k))
+      : [oddsFeedChannel(sport)];
+
   const subscriber = createRedisSubscriber();
 
   // Attach a no-op error listener so unhandled ioredis socket error events do not crash Node
@@ -35,7 +41,7 @@ export async function GET(request: Request): Promise<Response> {
     if (typeof subscriber.connect === "function") {
       await subscriber.connect();
     }
-    await subscriber.subscribe(channel);
+    await subscriber.subscribe(...channels);
   } catch {
     try {
       subscriber.removeAllListeners();
@@ -72,7 +78,7 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     try {
-      await subscriber.unsubscribe(channel);
+      await subscriber.unsubscribe(...channels);
     } catch {
       // Ignore unsubscribe errors during disconnect
     }
@@ -98,8 +104,9 @@ export async function GET(request: Request): Promise<Response> {
     start(controller) {
       const initialFrame = JSON.stringify({
         type: "connected",
-        sport_key: sportKey,
-        channel,
+        sport_key: sport,
+        channels,
+        channel: channels[0],
         updated_at: formatIso8601Utc(),
       });
       controller.enqueue(
@@ -111,7 +118,7 @@ export async function GET(request: Request): Promise<Response> {
       };
 
       subscriber.on("message", (incomingChannel: string, message: string) => {
-        if (cleanedUp || incomingChannel !== channel) {
+        if (cleanedUp || !channels.includes(incomingChannel)) {
           return;
         }
         const sanitized = message.replace(/[\r\n]+/g, " ");
