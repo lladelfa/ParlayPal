@@ -151,7 +151,46 @@ describe("GET /api/stream/odds", () => {
     expect(fakeSubscriber.quitCalled).toBe(true);
   });
 
-  it("returns 400 Problem Details when sport_key is missing or unsupported", async () => {
+  it("supports ?sport=all by subscribing to all supported sport channels", async () => {
+    const fakeSubscriber = new FakeRedisSubscriber();
+    setRedisSubscriberFactory(() => fakeSubscriber);
+
+    const request = new Request("http://localhost:3000/api/stream/odds?sport=all");
+    const response = await GET(request);
+
+    expect(response.status).toBe(200);
+    expect(fakeSubscriber.subscribedChannels).toEqual([
+      "odds:feed:americanfootball_nfl",
+      "odds:feed:basketball_nba",
+    ]);
+
+    const reader = response.body?.getReader();
+    const firstChunk = await reader!.read();
+    expect(firstChunk.done).toBe(false);
+    const decoder = new TextDecoder();
+    const firstText = decoder.decode(firstChunk.value);
+    expect(firstText).toContain('"sport_key":"all"');
+  });
+
+  it("supports ?sport=nfl and ?sport=nba query aliases", async () => {
+    const fakeSubscriber = new FakeRedisSubscriber();
+    setRedisSubscriberFactory(() => fakeSubscriber);
+
+    const requestNfl = new Request("http://localhost:3000/api/stream/odds?sport=nfl");
+    const responseNfl = await GET(requestNfl);
+    expect(responseNfl.status).toBe(200);
+    expect(fakeSubscriber.subscribedChannels).toContain("odds:feed:americanfootball_nfl");
+
+    const fakeSubscriberNba = new FakeRedisSubscriber();
+    setRedisSubscriberFactory(() => fakeSubscriberNba);
+
+    const requestNba = new Request("http://localhost:3000/api/stream/odds?sport=nba");
+    const responseNba = await GET(requestNba);
+    expect(responseNba.status).toBe(200);
+    expect(fakeSubscriberNba.subscribedChannels).toContain("odds:feed:basketball_nba");
+  });
+
+    it("returns 400 Problem Details when sport_key is missing or unsupported", async () => {
     const request = new Request(
       "http://localhost:3000/api/stream/odds?sport_key=baseball_mlb",
     );

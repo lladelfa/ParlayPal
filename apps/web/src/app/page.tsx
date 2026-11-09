@@ -1,24 +1,28 @@
 import { getCuratedPresetFeed } from "@/lib/presets";
-import { PresetFeed } from "@/components/PresetFeed";
+import { getMarketBrowserFeed } from "@/lib/markets";
+import { TerminalView } from "@/components/TerminalView";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const feed = await getCuratedPresetFeed();
+  const [presetFeed, marketFeed] = await Promise.all([
+    getCuratedPresetFeed(),
+    getMarketBrowserFeed(),
+  ]);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Hero Header */}
-      <header className="mb-8 flex flex-col justify-between gap-4 border-b border-border-hairline pb-6 sm:flex-row sm:items-center">
+      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-border-hairline pb-6 sm:flex-row sm:items-center">
         <div>
           <span className="inline-block rounded bg-surface-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent-cyan border border-border-hairline">
             Quantitative Value Engine
           </span>
           <h1 className="mt-2 font-display text-[28px] leading-[36px] font-bold tracking-tight text-text-primary">
-            Curated Preset Parlay Feed
+            ParlayPal Betting Intelligence
           </h1>
           <p className="mt-1 text-sm text-text-muted">
-            High-conviction NFL &amp; NBA presets with rolling hit rates, weather alerts, and devigged fair value.
+            High-conviction NFL &amp; NBA presets, schedule screener, rolling hit rates, and devigged fair value.
           </p>
         </div>
 
@@ -33,10 +37,11 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* Preset Parlays Feed Section */}
-      <section>
-        <PresetFeed initialCards={feed.cards} />
-      </section>
+      {/* Main Terminal View (Preset Feed + Schedule & Market Browser) */}
+      <TerminalView
+        initialPresets={presetFeed.cards}
+        initialMarketFeed={marketFeed}
+      />
     </main>
   );
 }

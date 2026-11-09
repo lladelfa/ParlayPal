@@ -18,6 +18,25 @@ export function isSupportedSportKey(
   return (SUPPORTED_SPORT_KEYS as readonly string[]).includes(value);
 }
 
+export function normalizeSportParam(
+  value: string | null | undefined,
+): SupportedSportKey | "all" | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "all") {
+    return "all";
+  }
+  if (normalized === "nfl" || normalized === "americanfootball_nfl") {
+    return "americanfootball_nfl";
+  }
+  if (normalized === "nba" || normalized === "basketball_nba") {
+    return "basketball_nba";
+  }
+  return null;
+}
+
 export function oddsLatestKey(sportKey: string, eventId: string): string {
   return `odds:latest:${sportKey}:${eventId}`;
 }
@@ -32,6 +51,16 @@ export function sgpAuditKey(eventId: string): string {
 
 export function oddsFeedChannel(sportKey: string): string {
   return `odds:feed:${sportKey}`;
+}
+
+export function marketsBrowserKey(sportKey?: string): string {
+  if (sportKey && sportKey.toLowerCase().includes("nfl")) {
+    return "markets:browser:nfl";
+  }
+  if (sportKey && sportKey.toLowerCase().includes("nba")) {
+    return "markets:browser:nba";
+  }
+  return "markets:browser:all";
 }
 
 export function presetsFeedKey(sportKey?: string): string {
@@ -67,12 +96,14 @@ export type RedisSubscriberFactory = () => RedisSubscriber;
 
 function defaultSubscriberFactory(): RedisSubscriber {
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379/0";
-  return new Redis(redisUrl, {
+  const sub = new Redis(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: () => null,
   });
+  sub.on("error", () => {});
+  return sub;
 }
 
 let activeSubscriberFactory: RedisSubscriberFactory = defaultSubscriberFactory;
@@ -88,22 +119,26 @@ export function setRedisSubscriberFactory(
 }
 
 export interface RedisClient {
+  connect?(): Promise<unknown>;
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
   quit(): Promise<unknown>;
   disconnect(): void;
+  on?(event: "error", listener: (error: Error) => void): this;
 }
 
 export type RedisClientFactory = () => RedisClient;
 
 function defaultClientFactory(): RedisClient {
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379/0";
-  return new Redis(redisUrl, {
+  const client = new Redis(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: () => null,
   });
+  client.on("error", () => {});
+  return client;
 }
 
 let activeClientFactory: RedisClientFactory = defaultClientFactory;
