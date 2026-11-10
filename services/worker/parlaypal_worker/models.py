@@ -260,7 +260,7 @@ class UserBet(Base):
             name="ck_user_bets_closing_decimal_odds_min",
         ),
         CheckConstraint(
-            "status IN ('PENDING', 'WON', 'LOST', 'PUSH', 'VOID')",
+            "status IN ('STAGED', 'staged', 'PENDING', 'pending', 'WON', 'LOST', 'PUSH', 'VOID')",
             name="ck_user_bets_status",
         ),
         CheckConstraint(

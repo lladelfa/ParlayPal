@@ -8,6 +8,7 @@ import {
   type LineshopperComparisonResult,
   type SportsbookId,
 } from "@/types/lineshopper";
+import { stageBetLocally } from "@/lib/ledger";
 import { LineshopperWidget } from "./LineshopperWidget";
 
 export function ParlayDrawer() {
@@ -78,15 +79,65 @@ export function ParlayDrawer() {
       }
 
       const data = await res.json();
-      const smartLink = data.url || data.universalLink;
+      const smartLink = data.url || data.universalLink || data.deepLink;
+      if (!smartLink) {
+        throw new Error("QuickPick serialization did not return a valid handoff URL");
+      }
       setGeneratedLink(smartLink);
+
+      // Auto-stage ticket into client-side ledger (localStorage)
+      const mappedLegs = slip.legs.map((leg) => ({
+        propId: leg.propId,
+        playerName: leg.playerName,
+        marketDisplay: leg.marketDisplay,
+        line: leg.lineValue,
+        selection: leg.selection,
+        offeredDecimalOdds: leg.offeredDecimalOdds,
+        eventId: leg.eventId,
+        sportKey: leg.sportKey,
+        teamAbbreviation: leg.teamAbbreviation,
+        marketKey: leg.marketKey,
+        offeredAmericanOdds: leg.offeredAmericanOdds,
+        guardedEv: leg.guardedEv,
+      }));
+
+      const parsedDecimalOdds = parseFloat(slip.combinedDecimalOdds);
+      const combinedDecimal = !isNaN(parsedDecimalOdds) && parsedDecimalOdds >= 1.01 ? parsedDecimalOdds : undefined;
+
+      const staged = stageBetLocally({
+        sportsbook: selectedSportsbook,
+        legs: mappedLegs,
+        decimalOdds: combinedDecimal,
+        americanOdds: slip.combinedAmericanOdds,
+        stakeAmount: 50,
+        quickpickUrl: smartLink,
+      });
+
+      // Non-blocking auto-staging POST to /api/bets/stage with matching IDs
+      fetch("/api/bets/stage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          betId: staged.betId,
+          userId: staged.userId,
+          sportsbook: selectedSportsbook,
+          legs: mappedLegs,
+          decimalOdds: combinedDecimal,
+          americanOdds: slip.combinedAmericanOdds,
+          stake: 50,
+          quickpickUrl: smartLink,
+        }),
+      }).catch((err) => {
+        console.warn("Backend staging network failure (cached in client ledger):", err);
+      });
+
       setLaunchSuccess(true);
-      const successTimer = setTimeout(() => setLaunchSuccess(false), 5000);
+      const successTimer = setTimeout(() => setLaunchSuccess(false), 4500);
       timersRef.current.push(successTimer);
 
       if (typeof window !== "undefined" && smartLink) {
         try {
-          const win = window.open(smartLink, "_blank", "noopener,noreferrer");
+          const win = window.open(smartLink, "_blank");
           if (!win || win.closed || typeof win.closed === "undefined") {
             setPopupBlocked(true);
           }
@@ -113,10 +164,10 @@ export function ParlayDrawer() {
         </div>
       )}
 
-      {/* QuickPick Launch Toast - Staggered vertically to prevent collision */}
+      {/* QuickPick Launch & Auto-Staging Confirmation Toast */}
       {launchSuccess && (
         <div className="fixed top-16 right-5 z-50 rounded-lg bg-accent-emerald px-4 py-2 font-sans text-xs font-bold text-surface-canvas shadow-xl">
-          ⚡ Staging {legCount}-leg parlay ticket into {targetBookName} via QuickPick!
+          Slip opened in {targetBookName} & staged for tracking
         </div>
       )}
 

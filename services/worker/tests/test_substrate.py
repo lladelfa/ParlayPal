@@ -187,9 +187,49 @@ def test_entity_persistence_uuid_v4_and_check_constraints() -> None:
             status="PENDING",
         )
         session.add(bet)
+
+        staged_bet = UserBet(
+            event_id=event.event_id,
+            prop_id=prop.prop_id,
+            external_provider_id="papi_bet_staged_777",
+            sportsbook="draftkings",
+            decimal_odds=Decimal("2.1000"),
+            stake_amount=Decimal("50.00"),
+            status="STAGED",
+        )
+        session.add(staged_bet)
+
+        staged_bet_lower = UserBet(
+            event_id=event.event_id,
+            prop_id=prop.prop_id,
+            external_provider_id="papi_bet_staged_lower_888",
+            sportsbook="fanduel",
+            decimal_odds=Decimal("2.1000"),
+            stake_amount=Decimal("50.00"),
+            status="staged",
+        )
+        session.add(staged_bet_lower)
         session.commit()
         assert bet.bet_id.version == 4
         assert bet.user_id.version == 4
+        assert staged_bet.bet_id.version == 4
+        assert staged_bet.status == "STAGED"
+        assert staged_bet_lower.status == "staged"
+
+    # Verify check constraint rejects invalid user bet status
+    with session_factory() as session:
+        invalid_bet = UserBet(
+            event_id=event.event_id,
+            prop_id=prop.prop_id,
+            external_provider_id="papi_bet_bad_status",
+            sportsbook="caesars",
+            decimal_odds=Decimal("2.0000"),
+            status="UNKNOWN_STATUS",
+        )
+        session.add(invalid_bet)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
 
     # Verify check constraint rejects decimal odds < 1.01
     with session_factory() as session:

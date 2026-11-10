@@ -31,7 +31,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 
 generated: 11-08-2026 23:05
-last_updated: 11-10-2026 10:27
+last_updated: 11-10-2026 13:00
 project: ParlayPal
 project_key: NOKEY
 tracking_system: file-system
@@ -51,10 +51,10 @@ development_status:
   2-3-real-time-odds-sgp-correlation-boost-hybrid-score-engine: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-multi-sportsbook-lineshopper-comparison: done
-  3-2-quickpick-payload-serialization-smart-link-generator: review
-  3-3-1-tap-sportsbook-handoff-auto-staging-execution: backlog
+  3-2-quickpick-payload-serialization-smart-link-generator: done
+  3-3-1-tap-sportsbook-handoff-auto-staging-execution: done
   epic-3-retrospective: optional
 
   epic-4: backlog
