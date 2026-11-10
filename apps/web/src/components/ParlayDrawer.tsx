@@ -3,6 +3,12 @@
 import React, { useState } from "react";
 import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 import type { ParlayLeg } from "@/types/parlay";
+import {
+  SPORTSBOOK_REGISTRY,
+  type LineshopperComparisonResult,
+  type SportsbookId,
+} from "@/types/lineshopper";
+import { LineshopperWidget } from "./LineshopperWidget";
 
 export function ParlayDrawer() {
   const {
@@ -11,6 +17,9 @@ export function ParlayDrawer() {
     isDocked,
     swappedLegPropId,
     toastMessage,
+    selectedSportsbook,
+    lineshopperComparison,
+    setSelectedSportsbook,
     removeLeg,
     openSwapModal,
     setIsOpen,
@@ -22,6 +31,10 @@ export function ParlayDrawer() {
   const [launchSuccess, setLaunchSuccess] = useState(false);
 
   const legCount = slip.legs.length;
+  const targetBookMeta = SPORTSBOOK_REGISTRY[selectedSportsbook] ?? SPORTSBOOK_REGISTRY.fanduel;
+  const targetBookName = targetBookMeta.name;
+  const isSelectedBookAvailable =
+    lineshopperComparison.bookmakers[selectedSportsbook]?.isAvailable ?? true;
 
   const formattedAmericanOdds =
     slip.combinedAmericanOdds > 0
@@ -32,7 +45,7 @@ export function ParlayDrawer() {
   const isPositiveEv = parseFloat(slip.combinedEv) > 0;
 
   const handleQuickPick = () => {
-    if (!slip.isValidParlay) return;
+    if (!slip.isValidParlay || !isSelectedBookAvailable) return;
     setIsLaunching(true);
     setTimeout(() => {
       setIsLaunching(false);
@@ -53,7 +66,7 @@ export function ParlayDrawer() {
       {/* QuickPick Launch Toast - Staggered vertically to prevent collision */}
       {launchSuccess && (
         <div className="fixed top-16 right-5 z-50 rounded-lg bg-accent-emerald px-4 py-2 font-sans text-xs font-bold text-surface-canvas shadow-xl">
-          ⚡ Staging {legCount}-leg parlay ticket into Sportsbook via QuickPick!
+          ⚡ Staging {legCount}-leg parlay ticket into {targetBookName} via QuickPick!
         </div>
       )}
 
@@ -73,6 +86,10 @@ export function ParlayDrawer() {
           evPct={evPct}
           isPositiveEv={isPositiveEv}
           swappedLegPropId={swappedLegPropId}
+          selectedSportsbook={selectedSportsbook}
+          lineshopperComparison={lineshopperComparison}
+          targetBookName={targetBookName}
+          onSelectSportsbook={setSelectedSportsbook}
           isLaunching={isLaunching}
           onRemoveLeg={removeLeg}
           onSwapLeg={openSwapModal}
@@ -166,6 +183,10 @@ export function ParlayDrawer() {
                   evPct={evPct}
                   isPositiveEv={isPositiveEv}
                   swappedLegPropId={swappedLegPropId}
+                  selectedSportsbook={selectedSportsbook}
+                  lineshopperComparison={lineshopperComparison}
+                  targetBookName={targetBookName}
+                  onSelectSportsbook={setSelectedSportsbook}
                   isLaunching={isLaunching}
                   onRemoveLeg={removeLeg}
                   onSwapLeg={openSwapModal}
@@ -188,6 +209,10 @@ interface DrawerContentProps {
   evPct: string;
   isPositiveEv: boolean;
   swappedLegPropId: string | null;
+  selectedSportsbook: SportsbookId;
+  lineshopperComparison: LineshopperComparisonResult;
+  targetBookName: string;
+  onSelectSportsbook: (sportsbookId: SportsbookId) => void;
   isLaunching: boolean;
   onRemoveLeg: (propId: string) => void;
   onSwapLeg: (leg: ParlayLeg) => void;
@@ -202,12 +227,25 @@ function DrawerContent({
   evPct,
   isPositiveEv,
   swappedLegPropId,
+  selectedSportsbook,
+  lineshopperComparison,
+  targetBookName,
+  onSelectSportsbook,
   isLaunching,
   onRemoveLeg,
   onSwapLeg,
   onClearSlip,
   onQuickPick,
 }: DrawerContentProps) {
+  const isSelectedBookAvailable =
+    lineshopperComparison.bookmakers[selectedSportsbook]?.isAvailable ?? true;
+  const isQuickPickDisabled = !slip.isValidParlay || !isSelectedBookAvailable || isLaunching;
+
+  let ctaButtonLabel = `⚡ Open in ${targetBookName} via QuickPick`;
+  if (!isSelectedBookAvailable) {
+    ctaButtonLabel = `Line Unavailable on ${targetBookName}`;
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* Drawer Header */}
@@ -321,7 +359,7 @@ function DrawerContent({
 
       {/* Legs List */}
       {legCount === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center text-text-muted">
+        <div className="flex flex-col items-center justify-center py-8 text-center text-text-muted">
           <div className="mb-2 text-2xl">📋</div>
           <p className="font-display text-sm font-semibold text-text-primary">
             Your slip is empty
@@ -329,6 +367,14 @@ function DrawerContent({
           <p className="mt-1 text-xs max-w-[240px]">
             Add legs directly from Curated Presets ("Customize Legs") or the Market Browser ("Add to Slip").
           </p>
+          <div className="mt-4 w-full">
+            <LineshopperWidget
+              legs={slip.legs}
+              comparison={lineshopperComparison}
+              selectedSportsbook={selectedSportsbook}
+              onSelectSportsbook={onSelectSportsbook}
+            />
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -400,17 +446,27 @@ function DrawerContent({
             </p>
           )}
 
-          {/* QuickPick Staging Button */}
+          {/* Multi-Sportsbook Lineshopper Widget */}
+          <div className="mt-1">
+            <LineshopperWidget
+              legs={slip.legs}
+              comparison={lineshopperComparison}
+              selectedSportsbook={selectedSportsbook}
+              onSelectSportsbook={onSelectSportsbook}
+            />
+          </div>
+
+          {/* QuickPick Staging Button with Target Bookmaker */}
           <button
             type="button"
-            disabled={!slip.isValidParlay || isLaunching}
+            disabled={isQuickPickDisabled}
             onClick={onQuickPick}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-accent-cyan px-4 py-3 font-sans text-xs font-bold uppercase tracking-wider text-surface-canvas hover:bg-cyan-400 active:scale-[0.98] transition-all shadow-[0_0_15px_rgba(6,182,212,0.35)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isLaunching ? (
               <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-surface-canvas border-t-transparent" />
             ) : (
-              <span>⚡ Open in Sportsbook via QuickPick</span>
+              <span>{ctaButtonLabel}</span>
             )}
           </button>
         </div>

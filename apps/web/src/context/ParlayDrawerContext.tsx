@@ -17,6 +17,11 @@ import type {
   SwapModalState,
 } from "@/types/parlay";
 import {
+  type LineshopperComparisonResult,
+  type SportsbookId,
+} from "@/types/lineshopper";
+import { compareMultiBookOdds } from "@/lib/lineshopper";
+import {
   addLegToSlip,
   calculateParlaySlip,
   getEligibleSwapCandidates,
@@ -36,6 +41,9 @@ interface ParlayDrawerContextType {
   candidatePool: MarketPropRow[];
   eligibleSwapCandidates: MarketPropRow[];
   toastMessage: string | null;
+  selectedSportsbook: SportsbookId;
+  lineshopperComparison: LineshopperComparisonResult;
+  setSelectedSportsbook: (bookId: SportsbookId) => void;
   addLeg: (leg: ParlayLeg) => boolean;
   addMarketProp: (prop: MarketPropRow) => boolean;
   loadPresetLegs: (legs: ParlayLeg[]) => void;
@@ -70,6 +78,9 @@ export function ParlayDrawerProvider({
   const [candidatePool, setCandidatePool] = useState<MarketPropRow[]>(initialCandidates);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const [selectedSportsbook, setSelectedSportsbookState] = useState<SportsbookId>("fanduel");
+  const userHasExplicitlySelectedRef = useRef(false);
+
   const [sgpOverrides, setSgpOverrides] = useState<SgpOverridesMap>({});
   const sgpOverridesRef = useRef<SgpOverridesMap>({});
   sgpOverridesRef.current = sgpOverrides;
@@ -80,6 +91,39 @@ export function ParlayDrawerProvider({
       setToastMessage((curr) => (curr === msg ? null : curr));
     }, 3000);
   }, []);
+
+  const setSelectedSportsbook = useCallback((bookId: SportsbookId) => {
+    userHasExplicitlySelectedRef.current = true;
+    setSelectedSportsbookState(bookId);
+  }, []);
+
+  // Compute live lineshopper multi-sportsbook pricing
+  const lineshopperComparison = useMemo(() => {
+    return compareMultiBookOdds(slip.legs, {
+      selectedSportsbook,
+    });
+  }, [slip.legs, selectedSportsbook]);
+
+  // Default to Best Value Book upon price calculation, or fall back to an available book if selected book becomes unavailable
+  useEffect(() => {
+    const currentPricing = lineshopperComparison.bookmakers[selectedSportsbook];
+    const isCurrentUnavailable = currentPricing && !currentPricing.isAvailable;
+
+    if (isCurrentUnavailable) {
+      const fallbackBook =
+        lineshopperComparison.bestValueBookId ??
+        lineshopperComparison.bookmakerList.find((b) => b.isAvailable)?.sportsbookId;
+      if (fallbackBook && fallbackBook !== selectedSportsbook) {
+        setSelectedSportsbookState(fallbackBook);
+      }
+    } else if (
+      !userHasExplicitlySelectedRef.current &&
+      lineshopperComparison.bestValueBookId &&
+      lineshopperComparison.bestValueBookId !== selectedSportsbook
+    ) {
+      setSelectedSportsbookState(lineshopperComparison.bestValueBookId);
+    }
+  }, [lineshopperComparison, selectedSportsbook]);
 
   const addLeg = useCallback(
     (newLeg: ParlayLeg): boolean => {
@@ -154,9 +198,11 @@ export function ParlayDrawerProvider({
   }, []);
 
   const clearSlip = useCallback(() => {
+    userHasExplicitlySelectedRef.current = false;
     setSgpOverrides({});
     sgpOverridesRef.current = {};
     setSlip(calculateParlaySlip([]));
+    setSelectedSportsbookState("fanduel");
   }, []);
 
   // Async SGP resolution when same-game clusters exist
@@ -314,6 +360,9 @@ export function ParlayDrawerProvider({
       candidatePool,
       eligibleSwapCandidates,
       toastMessage,
+      selectedSportsbook,
+      lineshopperComparison,
+      setSelectedSportsbook,
       addLeg,
       addMarketProp,
       loadPresetLegs,
@@ -336,6 +385,9 @@ export function ParlayDrawerProvider({
       candidatePool,
       eligibleSwapCandidates,
       toastMessage,
+      selectedSportsbook,
+      lineshopperComparison,
+      setSelectedSportsbook,
       addLeg,
       addMarketProp,
       loadPresetLegs,
