@@ -1,5 +1,6 @@
 import type { DateWindow, MarketPropRow, ValueTier } from "./market";
 import type { WeatherBadge } from "./preset";
+import type { SportsbookId, SportsbookQuote } from "./lineshopper";
 
 export interface ParlayLeg {
   propId: string;
@@ -30,6 +31,7 @@ export interface ParlayLeg {
   dateWindow?: DateWindow;
   valueTier?: ValueTier;
   isHighValue?: boolean;
+  sportsbookQuotes?: Partial<Record<SportsbookId, SportsbookQuote>>;
 }
 
 export interface SgpCorrelationAuditItem {
