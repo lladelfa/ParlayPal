@@ -1,4 +1,10 @@
-export type SportsbookId = "fanduel" | "draftkings" | "betmgm" | "caesars";
+export type SportsbookId =
+  | "fanduel"
+  | "draftkings"
+  | "betmgm"
+  | "caesars"
+  | "fanatics"
+  | "sleeper";
 
 export interface SportsbookMeta {
   id: SportsbookId;
@@ -37,6 +43,20 @@ export const SPORTSBOOK_REGISTRY: Record<SportsbookId, SportsbookMeta> = {
     brandColor: "#0c2340",
     accentColor: "#caa150",
   },
+  fanatics: {
+    id: "fanatics",
+    name: "Fanatics",
+    shortName: "FN",
+    brandColor: "#111111",
+    accentColor: "#f01d36",
+  },
+  sleeper: {
+    id: "sleeper",
+    name: "Sleeper",
+    shortName: "SL",
+    brandColor: "#0f1f2e",
+    accentColor: "#00c3a5",
+  },
 };
 
 export const INTEGRATED_SPORTSBOOKS: readonly SportsbookId[] = [
@@ -44,6 +64,8 @@ export const INTEGRATED_SPORTSBOOKS: readonly SportsbookId[] = [
   "draftkings",
   "betmgm",
   "caesars",
+  "fanatics",
+  "sleeper",
 ] as const;
 
 export interface SportsbookQuote {

@@ -27,6 +27,8 @@ export function getDeterministicLegQuote(
     draftkings: 1.0,
     betmgm: 0.985,
     caesars: 0.965,
+    fanatics: 1.01,
+    sleeper: 0.99,
   };
 
   const multiplier = multipliers[bookId] ?? 1.0;
@@ -197,12 +199,9 @@ export function compareMultiBookOdds(
   }
 
   // Gather quotes for each bookmaker across all legs
-  const bookmakerQuotes: Record<SportsbookId, SportsbookQuote[]> = {
-    fanduel: [],
-    draftkings: [],
-    betmgm: [],
-    caesars: [],
-  };
+  const bookmakerQuotes = Object.fromEntries(
+    INTEGRATED_SPORTSBOOKS.map((id) => [id, [] as SportsbookQuote[]]),
+  ) as Record<SportsbookId, SportsbookQuote[]>;
 
   for (const leg of legs) {
     for (const bookId of INTEGRATED_SPORTSBOOKS) {

@@ -69,11 +69,13 @@ describe("LineshopperWidget", () => {
       />,
     );
 
-    // Verify all 4 integrated books are present
+    // Verify integrated books are present
     expect(html).toContain("FanDuel");
     expect(html).toContain("DraftKings");
     expect(html).toContain("BetMGM");
     expect(html).toContain("Caesars");
+    expect(html).toContain("Fanatics");
+    expect(html).toContain("Sleeper");
 
     // Verify Best Value badge & odds
     expect(html).toContain("Best Value");

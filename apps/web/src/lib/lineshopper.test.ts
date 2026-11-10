@@ -47,18 +47,22 @@ function createMockLeg(
 
 describe("Lineshopper Pricing Engine", () => {
   describe("Happy Path Multi-Book Comparison", () => {
-    it("prices 2-leg parlay across all 4 books and highlights FanDuel as Best Value Book", () => {
+    it("prices 2-leg parlay across integrated books and highlights FanDuel as Best Value Book", () => {
       // Leg 1: Henry TD
       // Leg 2: St. Brown O6.5 Rec
       // FanDuel: 2.08 * 2.50 = 5.20 (+420)
       // DraftKings: 2.00 * 2.35 = 4.70 (+370)
       // BetMGM: 2.00 * 2.45 = 4.90 (+390)
       // Caesars: 2.00 * 2.25 = 4.50 (+350)
+      // Fanatics: 2.05 * 2.40 = 4.92 (+392)
+      // Sleeper: 1.95 * 2.30 = 4.485 (+349)
       const leg1 = createMockLeg("leg-1", "Derrick Henry", "Anytime Touchdown", {
         fanduel: { decimalOdds: 2.08 },
         draftkings: { decimalOdds: 2.00 },
         betmgm: { decimalOdds: 2.00 },
         caesars: { decimalOdds: 2.00 },
+        fanatics: { decimalOdds: 2.05 },
+        sleeper: { decimalOdds: 1.95 },
       });
 
       const leg2 = createMockLeg("leg-2", "Amon-Ra St. Brown", "Over 6.5 Receptions", {
@@ -66,6 +70,8 @@ describe("Lineshopper Pricing Engine", () => {
         draftkings: { decimalOdds: 2.35 },
         betmgm: { decimalOdds: 2.45 },
         caesars: { decimalOdds: 2.25 },
+        fanatics: { decimalOdds: 2.40 },
+        sleeper: { decimalOdds: 2.30 },
       });
 
       const result = compareMultiBookOdds([leg1, leg2]);
@@ -90,10 +96,13 @@ describe("Lineshopper Pricing Engine", () => {
       expect(result.bookmakers.caesars.combinedDecimalOdds).toBeCloseTo(4.50, 2);
       expect(result.bookmakers.caesars.combinedAmericanOdds).toBe(350);
 
-      // Runner up is BetMGM (4.90) or DK depending on benchmark
-      expect(result.runnerUpBookId).toBe("betmgm");
-      // Dollar edge against runner up: (5.20 - 4.90) * 50 = $15
-      expect(result.dollarEdge).toBeCloseTo(15.0, 1);
+      expect(result.bookmakers.fanatics.combinedDecimalOdds).toBeCloseTo(4.92, 2);
+      expect(result.bookmakers.sleeper.combinedDecimalOdds).toBeCloseTo(4.49, 2);
+
+      // Runner up is Fanatics (4.92)
+      expect(result.runnerUpBookId).toBe("fanatics");
+      // Dollar edge against runner up: (5.20 - 4.92) * 50 = $14
+      expect(result.dollarEdge).toBeCloseTo(14.0, 1);
 
       // If compared specifically against DK benchmark: (5.20 - 4.70) * 50 = $25
       const edgeVsDk = calculateDollarEdge(5.20, 4.70, 50);
@@ -237,7 +246,7 @@ describe("Lineshopper Pricing Engine", () => {
   });
 
   describe("Fallback Deterministic Quote Generation", () => {
-    it("generates deterministic quotes across 4 books when legs have no explicit sportsbookQuotes", () => {
+    it("generates deterministic quotes across integrated books when legs have no explicit sportsbookQuotes", () => {
       const leg1 = createMockLeg("leg-1", "Derrick Henry", "Anytime Touchdown");
       const leg2 = createMockLeg("leg-2", "Lamar Jackson", "Over 1.5 Passing TDs");
 
@@ -249,6 +258,8 @@ describe("Lineshopper Pricing Engine", () => {
       expect(result.bookmakers.draftkings.combinedDecimalOdds).toBeGreaterThanOrEqual(1.01);
       expect(result.bookmakers.betmgm.combinedDecimalOdds).toBeGreaterThanOrEqual(1.01);
       expect(result.bookmakers.caesars.combinedDecimalOdds).toBeGreaterThanOrEqual(1.01);
+      expect(result.bookmakers.fanatics.combinedDecimalOdds).toBeGreaterThanOrEqual(1.01);
+      expect(result.bookmakers.sleeper.combinedDecimalOdds).toBeGreaterThanOrEqual(1.01);
     });
   });
 

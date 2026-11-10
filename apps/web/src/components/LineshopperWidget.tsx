@@ -86,7 +86,7 @@ export function LineshopperWidget({
         </div>
       )}
 
-      {/* 4-Sportsbook Cards Grid */}
+      {/* Sportsbook Cards List */}
       <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Select Sportsbook">
         {comparison.bookmakerList.map((book) => {
           const isSelected = selectedSportsbook === book.sportsbookId;
