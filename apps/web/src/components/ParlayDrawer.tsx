@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 import type { ParlayLeg } from "@/types/parlay";
 import {
@@ -29,6 +29,16 @@ export function ParlayDrawer() {
 
   const [isLaunching, setIsLaunching] = useState(false);
   const [launchSuccess, setLaunchSuccess] = useState(false);
+  const [quickPickError, setQuickPickError] = useState<string | null>(null);
+  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
+  const timersRef = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach(clearTimeout);
+    };
+  }, []);
 
   const legCount = slip.legs.length;
   const targetBookMeta = SPORTSBOOK_REGISTRY[selectedSportsbook] ?? SPORTSBOOK_REGISTRY.fanduel;
@@ -44,14 +54,54 @@ export function ParlayDrawer() {
   const evPct = (parseFloat(slip.combinedEv) * 100).toFixed(1);
   const isPositiveEv = parseFloat(slip.combinedEv) > 0;
 
-  const handleQuickPick = () => {
-    if (!slip.isValidParlay || !isSelectedBookAvailable) return;
+  const handleQuickPick = async () => {
+    if (legCount < 1 || !isSelectedBookAvailable || isLaunching) return;
     setIsLaunching(true);
-    setTimeout(() => {
-      setIsLaunching(false);
+    setQuickPickError(null);
+    setPopupBlocked(false);
+
+    try {
+      const res = await fetch("/api/quickpick/serialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sportsbook: selectedSportsbook,
+          legs: slip.legs,
+          stake: 50,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const msg = errJson.error?.message || `Failed to serialize betslip (${res.status})`;
+        throw new Error(msg);
+      }
+
+      const data = await res.json();
+      const smartLink = data.url || data.universalLink;
+      setGeneratedLink(smartLink);
       setLaunchSuccess(true);
-      setTimeout(() => setLaunchSuccess(false), 3000);
-    }, 600);
+      const successTimer = setTimeout(() => setLaunchSuccess(false), 5000);
+      timersRef.current.push(successTimer);
+
+      if (typeof window !== "undefined" && smartLink) {
+        try {
+          const win = window.open(smartLink, "_blank", "noopener,noreferrer");
+          if (!win || win.closed || typeof win.closed === "undefined") {
+            setPopupBlocked(true);
+          }
+        } catch {
+          setPopupBlocked(true);
+        }
+      }
+    } catch (err: any) {
+      console.error("QuickPick serialization error:", err);
+      setQuickPickError(err?.message || "Failed to generate QuickPick link");
+      const errTimer = setTimeout(() => setQuickPickError(null), 4000);
+      timersRef.current.push(errTimer);
+    } finally {
+      setIsLaunching(false);
+    }
   };
 
   return (
@@ -67,6 +117,13 @@ export function ParlayDrawer() {
       {launchSuccess && (
         <div className="fixed top-16 right-5 z-50 rounded-lg bg-accent-emerald px-4 py-2 font-sans text-xs font-bold text-surface-canvas shadow-xl">
           ⚡ Staging {legCount}-leg parlay ticket into {targetBookName} via QuickPick!
+        </div>
+      )}
+
+      {/* QuickPick Error Toast */}
+      {quickPickError && (
+        <div className="fixed top-28 right-5 z-50 rounded-lg bg-accent-amber px-4 py-2 font-sans text-xs font-bold text-surface-canvas shadow-xl">
+          ⚠️ QuickPick error: {quickPickError}
         </div>
       )}
 
@@ -91,6 +148,8 @@ export function ParlayDrawer() {
           targetBookName={targetBookName}
           onSelectSportsbook={setSelectedSportsbook}
           isLaunching={isLaunching}
+          generatedLink={generatedLink}
+          popupBlocked={popupBlocked}
           onRemoveLeg={removeLeg}
           onSwapLeg={openSwapModal}
           onClearSlip={clearSlip}
@@ -188,6 +247,8 @@ export function ParlayDrawer() {
                   targetBookName={targetBookName}
                   onSelectSportsbook={setSelectedSportsbook}
                   isLaunching={isLaunching}
+                  generatedLink={generatedLink}
+                  popupBlocked={popupBlocked}
                   onRemoveLeg={removeLeg}
                   onSwapLeg={openSwapModal}
                   onClearSlip={clearSlip}
@@ -214,6 +275,8 @@ interface DrawerContentProps {
   targetBookName: string;
   onSelectSportsbook: (sportsbookId: SportsbookId) => void;
   isLaunching: boolean;
+  generatedLink?: string | null;
+  popupBlocked?: boolean;
   onRemoveLeg: (propId: string) => void;
   onSwapLeg: (leg: ParlayLeg) => void;
   onClearSlip: () => void;
@@ -232,6 +295,8 @@ function DrawerContent({
   targetBookName,
   onSelectSportsbook,
   isLaunching,
+  generatedLink,
+  popupBlocked,
   onRemoveLeg,
   onSwapLeg,
   onClearSlip,
@@ -239,9 +304,12 @@ function DrawerContent({
 }: DrawerContentProps) {
   const isSelectedBookAvailable =
     lineshopperComparison.bookmakers[selectedSportsbook]?.isAvailable ?? true;
-  const isQuickPickDisabled = !slip.isValidParlay || !isSelectedBookAvailable || isLaunching;
+  const isQuickPickDisabled = legCount < 1 || !isSelectedBookAvailable || isLaunching;
 
-  let ctaButtonLabel = `⚡ Open in ${targetBookName} via QuickPick`;
+  let ctaButtonLabel =
+    legCount === 1
+      ? `⚡ Open Bet in ${targetBookName} via QuickPick`
+      : `⚡ Open in ${targetBookName} via QuickPick`;
   if (!isSelectedBookAvailable) {
     ctaButtonLabel = `Line Unavailable on ${targetBookName}`;
   }
@@ -469,6 +537,23 @@ function DrawerContent({
               <span>{ctaButtonLabel}</span>
             )}
           </button>
+
+          {/* Fallback Direct Smart Link if generated or popup blocked */}
+          {generatedLink && (
+            <div className="mt-1 flex items-center justify-between rounded bg-surface-module px-3 py-1.5 text-[11px] text-text-muted border border-border-hairline">
+              <span className="truncate mr-2 font-mono text-[10px]">
+                {popupBlocked ? "Popup blocked:" : "Pikkit Smart Link:"}
+              </span>
+              <a
+                href={generatedLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-cyan font-bold hover:underline shrink-0"
+              >
+                Open Slip ↗
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>
