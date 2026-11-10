@@ -63,11 +63,13 @@ const ParlayDrawerContext = createContext<ParlayDrawerContextType | null>(null);
 export function ParlayDrawerProvider({
   children,
   initialCandidates = [],
+  initialLegs = [],
 }: {
   children: React.ReactNode;
   initialCandidates?: MarketPropRow[];
+  initialLegs?: ParlayLeg[];
 }) {
-  const [slip, setSlip] = useState<ParlaySlip>(() => calculateParlaySlip([]));
+  const [slip, setSlip] = useState<ParlaySlip>(() => calculateParlaySlip(initialLegs));
   const [isOpen, setIsOpen] = useState(false);
   const [isDocked, setIsDocked] = useState(false);
   const [swappedLegPropId, setSwappedLegPropId] = useState<string | null>(null);
