@@ -5,8 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -260,7 +262,7 @@ class UserBet(Base):
             name="ck_user_bets_closing_decimal_odds_min",
         ),
         CheckConstraint(
-            "status IN ('STAGED', 'staged', 'PENDING', 'pending', 'WON', 'LOST', 'PUSH', 'VOID')",
+            "status IN ('STAGED', 'staged', 'PENDING', 'pending', 'WON', 'won', 'LOST', 'lost', 'PUSH', 'push', 'VOID', 'void', 'settled_won', 'settled_lost')",
             name="ck_user_bets_status",
         ),
         CheckConstraint(
@@ -279,10 +281,10 @@ class UserBet(Base):
         nullable=False,
         default=uuid.uuid4,
     )
-    event_id: Mapped[uuid.UUID] = mapped_column(
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("events.event_id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     prop_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -320,6 +322,11 @@ class UserBet(Base):
         String(32),
         nullable=False,
         default="PENDING",
+    )
+    legs_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
     )
     placed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

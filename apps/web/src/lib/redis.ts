@@ -73,6 +73,14 @@ export function presetsFeedKey(sportKey?: string): string {
   return "presets:feed:all";
 }
 
+export function userBetsKey(userId: string): string {
+  return `bets:user:${userId}`;
+}
+
+export function userBetKey(betId: string): string {
+  return `bets:ticket:${betId}`;
+}
+
 export function formatIso8601Utc(date: Date = new Date()): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
