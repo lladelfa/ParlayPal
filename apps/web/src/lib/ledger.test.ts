@@ -5,10 +5,17 @@ import {
   clearStagedBets,
   getGuestUserId,
   stageBetLocally,
+  getTrackedBets,
+  saveTrackedBet,
+  confirmStagedBet,
+  updateTrackedBetStatus,
+  deleteTrackedBet,
+  calculateBetSummaryMetrics,
   STAGED_BETS_STORAGE_KEY,
+  TRACKED_BETS_STORAGE_KEY,
   GUEST_USER_ID_STORAGE_KEY,
 } from "./ledger";
-import type { StagedBet, BetLeg } from "@/types/bet";
+import type { StagedBet, BetLeg, TrackedBet } from "@/types/bet";
 
 class MockStorage implements Storage {
   private store = new Map<string, string>();
@@ -218,5 +225,145 @@ describe("Client Staged Bet Ledger (apps/web/src/lib/ledger.ts)", () => {
     const bet = createMockBet("ssr-bet");
     expect(saveStagedBet(bet)).toEqual(bet);
     expect(() => clearStagedBets()).not.toThrow();
+  });
+
+  describe("Tracked Bet Ledger Operations & Metrics", () => {
+    it("getTrackedBets returns staged and tracked bets sorted by recency", () => {
+      const staged = createMockBet("staged-1", { stagedAt: "2026-11-10T10:00:00Z" });
+      saveStagedBet(staged);
+
+      const tracked = {
+        ...createMockBet("tracked-1"),
+        status: "pending" as const,
+        placedAt: "2026-11-10T11:00:00Z",
+      };
+      saveTrackedBet(tracked);
+
+      const all = getTrackedBets();
+      expect(all).toHaveLength(2);
+      expect(all[0].betId).toBe("tracked-1");
+      expect(all[1].betId).toBe("staged-1");
+    });
+
+    it("confirmStagedBet transitions bet from staged to pending with confirmed stake", () => {
+      const staged = createMockBet("bet-confirm", {
+        decimalOdds: 3.0,
+        stakeAmount: 10,
+        potentialPayout: 30,
+      });
+      saveStagedBet(staged);
+
+      const confirmed = confirmStagedBet("bet-confirm", 25.0);
+      expect(confirmed.status).toBe("pending");
+      expect(confirmed.stakeAmount).toBe(25.0);
+      expect(confirmed.potentialPayout).toBe(75.0);
+      expect(confirmed.placedAt).toBeDefined();
+
+      const retrieved = getTrackedBets().find((b) => b.betId === "bet-confirm");
+      expect(retrieved?.status).toBe("pending");
+      expect(retrieved?.stakeAmount).toBe(25.0);
+    });
+
+    it("confirmStagedBet throws if stake is <= 0 or invalid", () => {
+      const staged = createMockBet("bet-invalid-stake");
+      saveStagedBet(staged);
+
+      expect(() => confirmStagedBet("bet-invalid-stake", 0)).toThrowError(
+        "Stake must be greater than $0.00",
+      );
+      expect(() => confirmStagedBet("bet-invalid-stake", -50)).toThrowError(
+        "Stake must be greater than $0.00",
+      );
+      expect(() => confirmStagedBet("bet-invalid-stake", NaN)).toThrowError(
+        "Stake must be greater than $0.00",
+      );
+    });
+
+    it("confirmStagedBet throws if bet is not found", () => {
+      expect(() => confirmStagedBet("non-existent-id", 50)).toThrowError(
+        "Bet with id non-existent-id not found.",
+      );
+    });
+
+    it("updateTrackedBetStatus updates status, stamps settledAt, and prevents re-settling finalized bets", () => {
+      const pendingBet: TrackedBet = {
+        ...createMockBet("bet-settle"),
+        status: "pending",
+        placedAt: "2026-11-10T12:00:00Z",
+      };
+      saveTrackedBet(pendingBet);
+
+      const won = updateTrackedBetStatus("bet-settle", "won");
+      expect(won.status).toBe("won");
+      expect(won.settledAt).toBeDefined();
+
+      // Trying to re-settle a finalized won bet throws
+      expect(() => updateTrackedBetStatus("bet-settle", "lost")).toThrowError(
+        /Cannot re-settle an already finalized bet/,
+      );
+    });
+
+    it("deleteTrackedBet removes the bet from all storage keys", () => {
+      const staged = createMockBet("bet-delete-me");
+      saveStagedBet(staged);
+
+      expect(getTrackedBets().some((b) => b.betId === "bet-delete-me")).toBe(true);
+
+      const removed = deleteTrackedBet("bet-delete-me");
+      expect(removed).toBe(true);
+      expect(getTrackedBets().some((b) => b.betId === "bet-delete-me")).toBe(false);
+      expect(getStagedBets().some((b) => b.betId === "bet-delete-me")).toBe(false);
+    });
+
+    it("calculateBetSummaryMetrics accurately calculates totals, active action, net profit, and ROI", () => {
+      const bets: TrackedBet[] = [
+        {
+          ...createMockBet("b1"),
+          status: "staged",
+          stakeAmount: 50,
+          decimalOdds: 2.0,
+          potentialPayout: 100,
+        },
+        {
+          ...createMockBet("b2"),
+          status: "pending",
+          stakeAmount: 25,
+          decimalOdds: 3.0,
+          potentialPayout: 75,
+        },
+        {
+          ...createMockBet("b3"),
+          status: "won",
+          stakeAmount: 50,
+          decimalOdds: 2.5,
+          potentialPayout: 125, // returns $125
+        },
+        {
+          ...createMockBet("b4"),
+          status: "lost",
+          stakeAmount: 50,
+          decimalOdds: 2.0,
+          potentialPayout: 100,
+        },
+      ];
+
+      const metrics = calculateBetSummaryMetrics(bets);
+      expect(metrics.totalBets).toBe(4);
+      expect(metrics.stagedCount).toBe(1);
+      expect(metrics.pendingCount).toBe(1);
+      expect(metrics.wonCount).toBe(1);
+      expect(metrics.lostCount).toBe(1);
+      expect(metrics.activeAction).toBe(25);
+      // Total staked (pending + won + lost) = 25 + 50 + 50 = 125
+      expect(metrics.totalStaked).toBe(125);
+      // Total settled staked = 50 (won) + 50 (lost) = 100
+      expect(metrics.totalSettledStaked).toBe(100);
+      // Total return = 125
+      expect(metrics.totalReturn).toBe(125);
+      // Net profit = 125 - 100 = 25
+      expect(metrics.netProfit).toBe(25);
+      // ROI = (25 / 100) * 100 = 25%
+      expect(metrics.roi).toBe(25);
+    });
   });
 });

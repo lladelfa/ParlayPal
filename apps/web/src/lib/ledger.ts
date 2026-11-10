@@ -1,10 +1,18 @@
-import type { StagedBet, BetLeg } from "@/types/bet";
+import type {
+  StagedBet,
+  BetLeg,
+  TrackedBet,
+  BetStatus,
+  BetSummaryMetrics,
+} from "@/types/bet";
 
 export const STAGED_BETS_STORAGE_KEY = "parlaypal:staged_bets";
+export const TRACKED_BETS_STORAGE_KEY = "parlaypal:tracked_bets";
 export const GUEST_USER_ID_STORAGE_KEY = "parlaypal:guest_user_id";
 export const MAX_STAGED_BETS_CAP = 100;
+export const MAX_TRACKED_BETS_CAP = 200;
 
-function generateUUID(): string {
+export function generateUUID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -90,6 +98,12 @@ export function saveStagedBet(bet: StagedBet): StagedBet {
     const filtered = current.filter((b) => b && typeof b === "object" && b.betId !== bet.betId);
     const updated = [bet, ...filtered].slice(0, MAX_STAGED_BETS_CAP);
     storage.setItem(STAGED_BETS_STORAGE_KEY, JSON.stringify(updated));
+
+    // Also mirror into tracked bets storage
+    saveTrackedBet({
+      ...bet,
+      status: "staged",
+    });
   } catch (err) {
     console.warn("Failed to persist staged bet to localStorage:", err);
   }
@@ -188,4 +202,256 @@ export function stageBetLocally(input: StageBetLocallyInput): StagedBet {
   };
 
   return saveStagedBet(stagedBet);
+}
+
+/**
+ * Retrieves all tracked bets (staged, pending, won, lost, void) from localStorage.
+ * Combines with any legacy/isolated staged bets and sorts by most recent first.
+ */
+export function getTrackedBets(): TrackedBet[] {
+  const storage = getStorage();
+  if (!storage) {
+    return [];
+  }
+
+  try {
+    const rawTracked = storage.getItem(TRACKED_BETS_STORAGE_KEY);
+    let trackedList: TrackedBet[] = [];
+    if (rawTracked) {
+      const parsed = JSON.parse(rawTracked);
+      if (Array.isArray(parsed)) {
+        trackedList = parsed as TrackedBet[];
+      }
+    }
+
+    // Merge in any staged bets not yet tracked
+    const stagedBets = getStagedBets();
+    const existingIds = new Set(trackedList.map((b) => b.betId));
+
+    for (const staged of stagedBets) {
+      if (!existingIds.has(staged.betId)) {
+        trackedList.push({
+          ...staged,
+          status: "staged",
+        });
+        existingIds.add(staged.betId);
+      }
+    }
+
+    // Sort by timestamp descending
+    trackedList.sort((a, b) => {
+      const timeA = new Date(a.placedAt || a.stagedAt || 0).getTime();
+      const timeB = new Date(b.placedAt || b.stagedAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    return trackedList;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persists or updates a TrackedBet in client localStorage.
+ */
+export function saveTrackedBet(bet: TrackedBet): TrackedBet {
+  const storage = getStorage();
+  if (!storage) {
+    return bet;
+  }
+
+  try {
+    const rawTracked = storage.getItem(TRACKED_BETS_STORAGE_KEY);
+    let current: TrackedBet[] = [];
+    if (rawTracked) {
+      const parsed = JSON.parse(rawTracked);
+      if (Array.isArray(parsed)) {
+        current = parsed;
+      }
+    }
+
+    const filtered = current.filter((b) => b && b.betId !== bet.betId);
+    const updated = [bet, ...filtered].slice(0, MAX_TRACKED_BETS_CAP);
+    storage.setItem(TRACKED_BETS_STORAGE_KEY, JSON.stringify(updated));
+
+    // If bet transitioned away from staged, also remove from staged bets storage
+    if (bet.status !== "staged") {
+      const currentStaged = getStagedBets();
+      const filteredStaged = currentStaged.filter((b) => b.betId !== bet.betId);
+      storage.setItem(STAGED_BETS_STORAGE_KEY, JSON.stringify(filteredStaged));
+    }
+  } catch (err) {
+    console.warn("Failed to persist tracked bet to localStorage:", err);
+  }
+
+  return bet;
+}
+
+/**
+ * Transitions a staged bet to pending with a confirmed stake amount and recalculated payout.
+ */
+export function confirmStagedBet(betId: string, stakeAmount: number): TrackedBet {
+  const parsedStake = Number(stakeAmount);
+  if (isNaN(parsedStake) || !isFinite(parsedStake) || parsedStake <= 0) {
+    throw new Error("Stake must be greater than $0.00");
+  }
+
+  const allBets = getTrackedBets();
+  const existing = allBets.find((b) => b.betId === betId);
+  if (!existing) {
+    throw new Error(`Bet with id ${betId} not found.`);
+  }
+
+  const currentStatus = (existing.status || "").toLowerCase();
+  if (currentStatus !== "staged") {
+    throw new Error(`Only staged bets can be confirmed. Current status is ${existing.status}.`);
+  }
+
+  const updatedBet: TrackedBet = {
+    ...existing,
+    status: "pending",
+    stakeAmount: parsedStake,
+    stake: parsedStake,
+    potentialPayout: Number((parsedStake * existing.decimalOdds).toFixed(2)),
+    placedAt: new Date().toISOString(),
+  };
+
+  return saveTrackedBet(updatedBet);
+}
+
+/**
+ * Updates a bet's status (e.g. won, lost, void) and prevents re-settling finalized bets.
+ */
+export function updateTrackedBetStatus(betId: string, status: BetStatus): TrackedBet {
+  const allBets = getTrackedBets();
+  const existing = allBets.find((b) => b.betId === betId);
+  if (!existing) {
+    throw new Error(`Bet with id ${betId} not found.`);
+  }
+
+  const finalizedStatuses = new Set([
+    "won",
+    "lost",
+    "settled_won",
+    "settled_lost",
+    "void",
+    "push",
+  ]);
+
+  const currentStatus = (existing.status || "").toLowerCase();
+  if (finalizedStatuses.has(currentStatus)) {
+    throw new Error(`Cannot re-settle an already finalized bet with status: ${existing.status}`);
+  }
+
+  const updatedBet: TrackedBet = {
+    ...existing,
+    status,
+    settledAt: finalizedStatuses.has(status) ? new Date().toISOString() : existing.settledAt,
+  };
+
+  return saveTrackedBet(updatedBet);
+}
+
+/**
+ * Deletes a tracked bet from all localStorage keys.
+ */
+export function deleteTrackedBet(betId: string): boolean {
+  const storage = getStorage();
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    let removed = false;
+    const rawTracked = storage.getItem(TRACKED_BETS_STORAGE_KEY);
+    if (rawTracked) {
+      const parsed = JSON.parse(rawTracked);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((b: TrackedBet) => {
+          if (b.betId === betId) {
+            removed = true;
+            return false;
+          }
+          return true;
+        });
+        storage.setItem(TRACKED_BETS_STORAGE_KEY, JSON.stringify(filtered));
+      }
+    }
+
+    const currentStaged = getStagedBets();
+    const filteredStaged = currentStaged.filter((b) => {
+      if (b.betId === betId) {
+        removed = true;
+        return false;
+      }
+      return true;
+    });
+    storage.setItem(STAGED_BETS_STORAGE_KEY, JSON.stringify(filteredStaged));
+
+    return removed;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Calculates summary metrics for bet tracking dashboard.
+ */
+export function calculateBetSummaryMetrics(bets: TrackedBet[]): BetSummaryMetrics {
+  let stagedCount = 0;
+  let pendingCount = 0;
+  let wonCount = 0;
+  let lostCount = 0;
+  let activeAction = 0;
+  let totalSettledStaked = 0;
+  let totalStaked = 0;
+  let totalReturn = 0;
+
+  for (const bet of bets) {
+    const s = (bet.status || "").toLowerCase();
+    const stake = bet.stakeAmount || bet.stake || 0;
+    const payout = bet.potentialPayout || (stake * (bet.decimalOdds || 1));
+
+    if (s === "staged") {
+      stagedCount++;
+    } else if (s === "pending") {
+      pendingCount++;
+      activeAction += stake;
+      totalStaked += stake;
+    } else if (s === "won" || s === "settled_won") {
+      wonCount++;
+      totalSettledStaked += stake;
+      totalStaked += stake;
+      totalReturn += payout;
+    } else if (s === "lost" || s === "settled_lost") {
+      lostCount++;
+      totalSettledStaked += stake;
+      totalStaked += stake;
+    } else if (s === "void" || s === "push") {
+      // Void refunds stake
+      totalSettledStaked += stake;
+      totalStaked += stake;
+      totalReturn += stake;
+    }
+  }
+
+  const netProfit = Number((totalReturn - totalSettledStaked).toFixed(2));
+  const roi =
+    totalSettledStaked > 0
+      ? Number(((netProfit / totalSettledStaked) * 100).toFixed(2))
+      : 0;
+
+  return {
+    totalBets: bets.length,
+    stagedCount,
+    pendingCount,
+    wonCount,
+    lostCount,
+    activeAction: Number(activeAction.toFixed(2)),
+    totalStaked: Number(totalStaked.toFixed(2)),
+    totalSettledStaked: Number(totalSettledStaked.toFixed(2)),
+    totalReturn: Number(totalReturn.toFixed(2)),
+    netProfit,
+    roi,
+  };
 }
