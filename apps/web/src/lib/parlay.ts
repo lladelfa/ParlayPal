@@ -1,11 +1,23 @@
 import type { DateWindow, MarketPropRow } from "@/types/market";
-import type { ParlayLeg, ParlaySlip } from "@/types/parlay";
+import type {
+  ParlayLeg,
+  ParlaySlip,
+  SgpCorrelationAuditItem,
+} from "@/types/parlay";
 import type { PresetLeg } from "@/types/preset";
 import { decimalToAmerican } from "./math";
 
 export const MIN_PARLAY_LEGS = 2;
 export const MAX_PARLAY_LEGS = 8;
 export const MAX_GUARDED_EV_THRESHOLD = 0.10;
+
+export interface SgpEventOverride {
+  sgpFairProbability?: number | string;
+  hasPositiveSynergy?: boolean;
+  correlationAudit?: SgpCorrelationAuditItem[];
+}
+
+export type SgpOverridesMap = Record<string, SgpEventOverride>;
 
 /**
  * Classifies date window from an ISO timestamp.
@@ -30,11 +42,119 @@ export function classifyDateWindow(commenceTimeIso: string): DateWindow {
 }
 
 /**
- * Pure calculation function for parlay tickets.
- * Recalculates combined odds, joint fair probability, guarded EV,
- * and composite Hybrid Value Score.
+ * Empirical heuristic correlation estimator for intra-game pairs.
  */
-export function calculateParlaySlip(legs: ParlayLeg[]): ParlaySlip {
+export function estimateHeuristicPairCorrelation(
+  sportKey: string,
+  legA: ParlayLeg,
+  legB: ParlayLeg,
+): { corr: number; synergy: "positive" | "negative" | "neutral"; rationale: string } {
+  const sport = (sportKey || legA.sportKey || "nfl").toLowerCase();
+  const sameTeam =
+    legA.teamAbbreviation &&
+    legB.teamAbbreviation &&
+    legA.teamAbbreviation !== "TBD" &&
+    legB.teamAbbreviation !== "TBD" &&
+    legA.teamAbbreviation.toUpperCase() === legB.teamAbbreviation.toUpperCase();
+
+  const mA = legA.marketKey.toLowerCase();
+  const mB = legB.marketKey.toLowerCase();
+  const selA = legA.selection.toUpperCase();
+  const selB = legB.selection.toUpperCase();
+
+  if (sport.includes("nfl")) {
+    const isPassA = mA.includes("pass");
+    const isPassB = mB.includes("pass");
+    const isRecA = mA.includes("rec") || mA.includes("touchdown") || mA.includes("td");
+    const isRecB = mB.includes("rec") || mB.includes("touchdown") || mB.includes("td");
+    const isRushA = mA.includes("rush");
+    const isRushB = mB.includes("rush");
+
+    if (sameTeam) {
+      if ((isPassA && isRecB) || (isPassB && isRecA)) {
+        if (selA === "OVER" && selB === "OVER") {
+          return {
+            corr: 0.48,
+            synergy: "positive",
+            rationale: "Teammates QB Passing + Receiver production exhibit strong positive synergy.",
+          };
+        } else if (selA === "UNDER" && selB === "UNDER") {
+          return {
+            corr: 0.40,
+            synergy: "positive",
+            rationale: "Under passing volume correlates with under receiver production.",
+          };
+        }
+      }
+      if ((isPassA && isRushB) || (isPassB && isRushA)) {
+        if (selA === "OVER" && selB === "OVER") {
+          return {
+            corr: -0.15,
+            synergy: "negative",
+            rationale: "Passing volume and rushing attempts often compete for team offensive possession shares.",
+          };
+        }
+      }
+    } else {
+      if (isRushA && isRushB && selA === "OVER" && selB === "OVER") {
+        return {
+          corr: -0.25,
+          synergy: "negative",
+          rationale: "Opposing run games compete for possession time and game script dominance.",
+        };
+      }
+    }
+  } else if (sport.includes("nba")) {
+    const isAstA = mA.includes("assist");
+    const isAstB = mB.includes("assist");
+    const isPtsA = mA.includes("point") || mA.includes("three");
+    const isPtsB = mB.includes("point") || mB.includes("three");
+    const isRebA = mA.includes("rebound");
+    const isRebB = mB.includes("rebound");
+
+    if (sameTeam) {
+      if ((isAstA && isPtsB) || (isAstB && isPtsA)) {
+        if (selA === "OVER" && selB === "OVER") {
+          return {
+            corr: 0.35,
+            synergy: "positive",
+            rationale: "Playmaker assist volume directly feeds teammate scoring opportunities.",
+          };
+        }
+      }
+      if (isPtsA && isPtsB && selA === "OVER" && selB === "OVER") {
+        return {
+          corr: -0.12,
+          synergy: "negative",
+          rationale: "Teammates share the same team possession and usage ceiling.",
+        };
+      }
+      if (isRebA && isRebB && selA === "OVER" && selB === "OVER") {
+        return {
+          corr: -0.18,
+          synergy: "negative",
+          rationale: "Teammates directly compete for rebound opportunities.",
+        };
+      }
+    }
+  }
+
+  return {
+    corr: 0.0,
+    synergy: "neutral",
+    rationale: "No significant intra-game correlation detected between selections.",
+  };
+}
+
+/**
+ * Pure calculation function for parlay tickets.
+ * Recalculates combined odds, dual-path fair probability (cross-game independent + SGP correlation),
+ * guarded EV, and composite Hybrid Value Score.
+ */
+export function calculateParlaySlip(
+  legs: ParlayLeg[],
+  sgpOverrides?: SgpOverridesMap,
+): ParlaySlip {
   if (legs.length === 0) {
     return {
       legs: [],
@@ -45,22 +165,115 @@ export function calculateParlaySlip(legs: ParlayLeg[]): ParlaySlip {
       hybridValueScore: 0,
       isValidParlay: false,
       isSameGameParlay: false,
+      hasPositiveSynergy: false,
     };
   }
 
-  // Joint decimal odds product: D_combined = prod(D_i)
+  // Combined Decimal Odds product: D_combined = prod(D_i)
   let combinedDecimal = 1.0;
-  // Joint fair probability product: P_combined = prod(P_i)
-  let combinedFairProb = 1.0;
-
   for (const leg of legs) {
     const dec = parseFloat(leg.offeredDecimalOdds) || 1.0;
-    const fair = parseFloat(leg.fairProbability) || 0.5;
     combinedDecimal *= dec;
-    combinedFairProb *= fair;
   }
 
-  const combinedEv = combinedFairProb * combinedDecimal - 1.0;
+  // Group legs by eventId to evaluate SGP clusters vs independent legs
+  const legsByEvent = new Map<string, ParlayLeg[]>();
+  for (const leg of legs) {
+    const list = legsByEvent.get(leg.eventId) ?? [];
+    list.push(leg);
+    legsByEvent.set(leg.eventId, list);
+  }
+
+  const isSameGameParlay = legs.length >= 2 && legsByEvent.size < legs.length;
+
+  let totalFairProb = 1.0;
+  let hasAnyPositiveSynergy = false;
+  let sgpFairProbabilityCombined = 1.0;
+  let hasSgpCluster = false;
+  const allAuditItems: SgpCorrelationAuditItem[] = [];
+
+  for (const [eventId, eventLegs] of legsByEvent.entries()) {
+    if (eventLegs.length >= 2) {
+      hasSgpCluster = true;
+      const override = sgpOverrides?.[eventId];
+
+      let unadjProb = 1.0;
+      for (const l of eventLegs) {
+        unadjProb *= parseFloat(l.fairProbability) || 0.5;
+      }
+
+      let clusterFairProb: number;
+      let clusterHasSynergy: boolean;
+
+      if (override && override.sgpFairProbability !== undefined) {
+        clusterFairProb =
+          typeof override.sgpFairProbability === "number"
+            ? override.sgpFairProbability
+            : parseFloat(override.sgpFairProbability);
+        clusterHasSynergy =
+          clusterFairProb > unadjProb &&
+          (override.hasPositiveSynergy ??
+            (override.correlationAudit?.some((a) => a.correlationCoefficient > 0.10) || false));
+
+        if (override.correlationAudit) {
+          allAuditItems.push(...override.correlationAudit);
+        }
+      } else {
+        // Empirical heuristic correlation calculation
+        let totalDelta = 0.0;
+        let pairCount = 0;
+        for (let i = 0; i < eventLegs.length; i++) {
+          for (let j = i + 1; j < eventLegs.length; j++) {
+            const lA = eventLegs[i];
+            const lB = eventLegs[j];
+            const { corr, synergy, rationale } = estimateHeuristicPairCorrelation(
+              lA.sportKey,
+              lA,
+              lB,
+            );
+
+            allAuditItems.push({
+              legAPropId: lA.propId,
+              legBPropId: lB.propId,
+              legADescription: `${lA.playerName} ${lA.selection} ${lA.marketDisplay}`,
+              legBDescription: `${lB.playerName} ${lB.selection} ${lB.marketDisplay}`,
+              correlationCoefficient: corr,
+              synergyType: synergy,
+              rationale,
+            });
+
+            const pA = parseFloat(lA.fairProbability) || 0.5;
+            const pB = parseFloat(lB.fairProbability) || 0.5;
+            const cov = corr * Math.sqrt(pA * (1 - pA) * pB * (1 - pB));
+            totalDelta += cov;
+            pairCount++;
+          }
+        }
+
+        const avgDelta = pairCount > 0 ? totalDelta / pairCount : 0.0;
+        const minLegProb = Math.min(
+          ...eventLegs.map((l) => parseFloat(l.fairProbability) || 0.5),
+        );
+        const rawProb = unadjProb + avgDelta;
+        clusterFairProb = Math.max(0.0001, Math.min(minLegProb - 0.0001, rawProb));
+        clusterHasSynergy =
+          clusterFairProb > unadjProb &&
+          allAuditItems.some((a) => a.correlationCoefficient > 0.10);
+      }
+
+      sgpFairProbabilityCombined *= clusterFairProb;
+      totalFairProb *= clusterFairProb;
+      if (clusterHasSynergy) {
+        hasAnyPositiveSynergy = true;
+      }
+    } else {
+      // Independent single leg from a separate event
+      const singleProb = parseFloat(eventLegs[0].fairProbability) || 0.5;
+      totalFairProb *= singleProb;
+    }
+  }
+
+  const combinedEv = totalFairProb * combinedDecimal - 1.0;
   const combinedAmericanOdds = decimalToAmerican(Math.max(1.01, combinedDecimal));
 
   // Compute composite Hybrid Value Score
@@ -77,19 +290,19 @@ export function calculateParlaySlip(legs: ParlayLeg[]): ParlaySlip {
     Math.min(100, Math.round(0.60 * hitPct + 0.40 * evComponent)),
   );
 
-  // Check if at least 2 legs share the same eventId (Same Game Parlay)
-  const eventIds = new Set(legs.map((l) => l.eventId));
-  const isSameGameParlay = legs.length >= 2 && eventIds.size < legs.length;
-
   return {
     legs,
     combinedDecimalOdds: combinedDecimal.toFixed(4),
     combinedAmericanOdds,
-    combinedFairProbability: combinedFairProb.toFixed(5),
+    combinedFairProbability: totalFairProb.toFixed(5),
     combinedEv: combinedEv.toFixed(4),
     hybridValueScore,
     isValidParlay: legs.length >= MIN_PARLAY_LEGS,
     isSameGameParlay,
+    hasPositiveSynergy: isSameGameParlay && hasAnyPositiveSynergy,
+    sgpFairProbability: hasSgpCluster ? sgpFairProbabilityCombined.toFixed(5) : undefined,
+    sgpCorrelationAudit: allAuditItems.length > 0 ? allAuditItems : undefined,
+    correlationAudit: allAuditItems.length > 0 ? allAuditItems.map((a) => a.rationale) : undefined,
   };
 }
 
@@ -100,6 +313,7 @@ export function calculateParlaySlip(legs: ParlayLeg[]): ParlaySlip {
 export function addLegToSlip(
   slip: ParlaySlip,
   newLeg: ParlayLeg,
+  sgpOverrides?: SgpOverridesMap,
 ): { slip: ParlaySlip; error?: string } {
   if (slip.legs.length >= MAX_PARLAY_LEGS) {
     return {
@@ -117,16 +331,20 @@ export function addLegToSlip(
 
   const updatedLegs = [...slip.legs, newLeg];
   return {
-    slip: calculateParlaySlip(updatedLegs),
+    slip: calculateParlaySlip(updatedLegs, sgpOverrides),
   };
 }
 
 /**
  * Removes a leg from the active slip and recalculates totals immediately.
  */
-export function removeLegFromSlip(slip: ParlaySlip, propId: string): ParlaySlip {
+export function removeLegFromSlip(
+  slip: ParlaySlip,
+  propId: string,
+  sgpOverrides?: SgpOverridesMap,
+): ParlaySlip {
   const updatedLegs = slip.legs.filter((l) => l.propId !== propId);
-  return calculateParlaySlip(updatedLegs);
+  return calculateParlaySlip(updatedLegs, sgpOverrides);
 }
 
 /**
@@ -137,6 +355,7 @@ export function swapLegInSlip(
   slip: ParlaySlip,
   targetPropId: string,
   replacementLeg: ParlayLeg,
+  sgpOverrides?: SgpOverridesMap,
 ): ParlaySlip {
   const targetIndex = slip.legs.findIndex((l) => l.propId === targetPropId);
   if (targetIndex === -1) {
@@ -153,7 +372,7 @@ export function swapLegInSlip(
 
   const updatedLegs = [...slip.legs];
   updatedLegs[targetIndex] = replacementLeg;
-  return calculateParlaySlip(updatedLegs);
+  return calculateParlaySlip(updatedLegs, sgpOverrides);
 }
 
 /**
@@ -164,6 +383,7 @@ export function updateSlipLegOdds(
   slip: ParlaySlip,
   propId: string,
   newOdds: number,
+  sgpOverrides?: SgpOverridesMap,
 ): ParlaySlip {
   const exists = slip.legs.some((l) => l.propId === propId);
   if (!exists) {
@@ -181,7 +401,7 @@ export function updateSlipLegOdds(
     return leg;
   });
 
-  return calculateParlaySlip(updatedLegs);
+  return calculateParlaySlip(updatedLegs, sgpOverrides);
 }
 
 /**

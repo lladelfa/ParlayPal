@@ -6,10 +6,16 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { MarketPropRow } from "@/types/market";
-import type { ParlayLeg, ParlaySlip, SwapModalState } from "@/types/parlay";
+import type {
+  ParlayLeg,
+  ParlaySlip,
+  SgpPriceResponse,
+  SwapModalState,
+} from "@/types/parlay";
 import {
   addLegToSlip,
   calculateParlaySlip,
@@ -18,6 +24,7 @@ import {
   removeLegFromSlip,
   swapLegInSlip,
   updateSlipLegOdds,
+  type SgpOverridesMap,
 } from "@/lib/parlay";
 
 interface ParlayDrawerContextType {
@@ -63,6 +70,10 @@ export function ParlayDrawerProvider({
   const [candidatePool, setCandidatePool] = useState<MarketPropRow[]>(initialCandidates);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const [sgpOverrides, setSgpOverrides] = useState<SgpOverridesMap>({});
+  const sgpOverridesRef = useRef<SgpOverridesMap>({});
+  sgpOverridesRef.current = sgpOverrides;
+
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -72,7 +83,7 @@ export function ParlayDrawerProvider({
 
   const addLeg = useCallback(
     (newLeg: ParlayLeg): boolean => {
-      const result = addLegToSlip(slip, newLeg);
+      const result = addLegToSlip(slip, newLeg, sgpOverridesRef.current);
       if (result.error) {
         showToast(result.error);
         return false;
@@ -94,14 +105,14 @@ export function ParlayDrawerProvider({
   );
 
   const loadPresetLegs = useCallback((legs: ParlayLeg[]) => {
-    const newSlip = calculateParlaySlip(legs);
+    const newSlip = calculateParlaySlip(legs, sgpOverridesRef.current);
     setSlip(newSlip);
     setIsOpen(true);
     setIsDocked(false);
   }, []);
 
   const removeLeg = useCallback((propId: string) => {
-    setSlip((currSlip) => removeLegFromSlip(currSlip, propId));
+    setSlip((currSlip) => removeLegFromSlip(currSlip, propId, sgpOverridesRef.current));
   }, []);
 
   const openSwapModal = useCallback((targetLeg: ParlayLeg) => {
@@ -121,7 +132,9 @@ export function ParlayDrawerProvider({
   const confirmSwap = useCallback(
     (targetPropId: string, replacement: MarketPropRow) => {
       const replacementLeg = marketPropRowToParlayLeg(replacement);
-      setSlip((currSlip) => swapLegInSlip(currSlip, targetPropId, replacementLeg));
+      setSlip((currSlip) =>
+        swapLegInSlip(currSlip, targetPropId, replacementLeg, sgpOverridesRef.current),
+      );
 
       // Trigger green highlight flash on swapped leg row
       setSwappedLegPropId(replacement.propId);
@@ -135,12 +148,89 @@ export function ParlayDrawerProvider({
   );
 
   const updateLegOdds = useCallback((propId: string, newDecimalOdds: number) => {
-    setSlip((currSlip) => updateSlipLegOdds(currSlip, propId, newDecimalOdds));
+    setSlip((currSlip) =>
+      updateSlipLegOdds(currSlip, propId, newDecimalOdds, sgpOverridesRef.current),
+    );
   }, []);
 
   const clearSlip = useCallback(() => {
+    setSgpOverrides({});
+    sgpOverridesRef.current = {};
     setSlip(calculateParlaySlip([]));
   }, []);
+
+  // Async SGP resolution when same-game clusters exist
+  useEffect(() => {
+    const legsByEvent = new Map<string, ParlayLeg[]>();
+    for (const leg of slip.legs) {
+      const list = legsByEvent.get(leg.eventId) ?? [];
+      list.push(leg);
+      legsByEvent.set(leg.eventId, list);
+    }
+
+    const sgpClusters: { eventId: string; sportKey: string; legs: ParlayLeg[] }[] = [];
+    for (const [eventId, eventLegs] of legsByEvent.entries()) {
+      if (eventLegs.length >= 2) {
+        sgpClusters.push({ eventId, sportKey: eventLegs[0].sportKey, legs: eventLegs });
+      }
+    }
+
+    // Clean up obsolete SGP overrides when an event drops below 2 legs
+    const activeClusterEventIds = new Set(sgpClusters.map((c) => c.eventId));
+    const currentOverrideKeys = Object.keys(sgpOverridesRef.current);
+    const obsoleteKeys = currentOverrideKeys.filter((k) => !activeClusterEventIds.has(k));
+
+    if (obsoleteKeys.length > 0) {
+      const cleanedOverrides: SgpOverridesMap = { ...sgpOverridesRef.current };
+      for (const k of obsoleteKeys) {
+        delete cleanedOverrides[k];
+      }
+      sgpOverridesRef.current = cleanedOverrides;
+      setSgpOverrides(cleanedOverrides);
+      setSlip((currSlip) => calculateParlaySlip(currSlip.legs, cleanedOverrides));
+    }
+
+    if (sgpClusters.length === 0) {
+      return;
+    }
+
+    let isMounted = true;
+
+    for (const cluster of sgpClusters) {
+      fetch("/api/sgp/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId: cluster.eventId,
+          sportKey: cluster.sportKey,
+          legs: cluster.legs,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: SgpPriceResponse | null) => {
+          if (!isMounted || !data) return;
+
+          const nextOverrides: SgpOverridesMap = {
+            ...sgpOverridesRef.current,
+            [cluster.eventId]: {
+              sgpFairProbability: data.sgpFairProbability,
+              hasPositiveSynergy: data.hasPositiveSynergy,
+              correlationAudit: data.correlationAudit,
+            },
+          };
+          sgpOverridesRef.current = nextOverrides;
+          setSgpOverrides(nextOverrides);
+          setSlip((currSlip) => calculateParlaySlip(currSlip.legs, nextOverrides));
+        })
+        .catch((err) => {
+          console.warn("SGP resolution fetch error:", err);
+        });
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [slip.legs]);
 
   // Listen for live SSE odds updates on any leg currently in the slip
   useEffect(() => {
@@ -177,7 +267,12 @@ export function ParlayDrawerProvider({
             setSlip((currSlip) => {
               let updated = currSlip;
               for (const d of deltas) {
-                updated = updateSlipLegOdds(updated, d.propId, d.newOdds);
+                updated = updateSlipLegOdds(
+                  updated,
+                  d.propId,
+                  d.newOdds,
+                  sgpOverridesRef.current,
+                );
               }
               return updated;
             });
