@@ -109,11 +109,18 @@ export function ParlayDrawer() {
               </div>
             </button>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {slip.isValidParlay && (
-                <span className="rounded bg-surface-module px-2.5 py-1 font-telemetry text-sm font-bold text-accent-violet border border-accent-violet/30">
-                  {formattedAmericanOdds}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {slip.hasPositiveSynergy && (
+                    <span className="rounded bg-accent-violet/20 px-1.5 py-0.5 text-[10px] font-bold text-accent-violet border border-accent-violet/30">
+                      ⚡ Boost
+                    </span>
+                  )}
+                  <span className="rounded bg-surface-module px-2.5 py-1 font-telemetry text-sm font-bold text-accent-violet border border-accent-violet/30">
+                    {formattedAmericanOdds}
+                  </span>
+                </div>
               )}
               <button
                 type="button"
@@ -230,13 +237,85 @@ function DrawerContent({
         )}
       </header>
 
-      {/* SGP Correlation Boost Badge */}
+      {/* SGP Correlation Boost Badge & Telemetry */}
       {slip.isSameGameParlay && (
-        <div className="flex items-center gap-2 rounded-lg bg-accent-violet/15 px-3 py-2 border border-accent-violet/30 text-accent-violet text-xs font-semibold">
-          <span>⚡ Correlated Boost</span>
-          <span className="text-[11px] text-text-muted font-normal">
-            (Same-Game synergy detected)
-          </span>
+        <div className="flex flex-col gap-2">
+          {slip.hasPositiveSynergy ? (
+            <div className="flex flex-col gap-1.5 rounded-lg bg-accent-violet/15 p-3 border border-accent-violet/40 text-accent-violet shadow-[0_0_12px_rgba(99,102,241,0.25)]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-xs">⚡ Correlated Boost</span>
+                  <span className="text-[10px] text-accent-emerald font-semibold font-telemetry">
+                    (+EV Synergy)
+                  </span>
+                </div>
+                {slip.sgpFairProbability && (
+                  <span className="font-telemetry text-[11px] font-bold text-accent-cyan">
+                    Fair P: {(parseFloat(slip.sgpFairProbability) * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-text-muted">
+                Intra-game synergy detected between correlated teammates.
+              </p>
+              {/* Correlation Audit Breakdown */}
+              {slip.sgpCorrelationAudit && slip.sgpCorrelationAudit.length > 0 && (
+                <div className="mt-1 flex flex-col gap-1.5 border-t border-accent-violet/20 pt-1.5">
+                  {slip.sgpCorrelationAudit.map((item, idx) => (
+                    <div
+                      key={`${item.legAPropId}-${item.legBPropId}-${item.correlationCoefficient}`}
+                      className="flex flex-col gap-0.5 rounded bg-surface-card/60 p-1.5 text-[10px]"
+                    >
+                      <div className="flex items-center justify-between font-medium">
+                        <span className="text-text-primary">
+                          {item.legADescription && item.legBDescription
+                            ? `${item.legADescription} + ${item.legBDescription}`
+                            : `Leg Pair ${idx + 1}`}
+                        </span>
+                        <span
+                          className={`font-telemetry font-bold ${
+                            item.correlationCoefficient > 0
+                              ? "text-accent-emerald"
+                              : "text-accent-amber"
+                          }`}
+                        >
+                          {item.correlationCoefficient > 0 ? "+" : ""}
+                          {item.correlationCoefficient.toFixed(2)}
+                        </span>
+                      </div>
+                      <span className="text-text-muted text-[10px] leading-tight">
+                        {item.rationale}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 rounded-lg bg-surface-module p-2.5 border border-border-hairline text-text-muted text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-text-muted">🔗 Same-Game Parlay</span>
+                <span className="text-[10px] text-text-muted font-normal">
+                  (Standard / Cannibalized)
+                </span>
+              </div>
+              {slip.sgpCorrelationAudit && slip.sgpCorrelationAudit.length > 0 && (
+                <div className="mt-1 flex flex-col gap-1 border-t border-border-hairline pt-1 text-[10px]">
+                  {slip.sgpCorrelationAudit.map((item) => (
+                    <div
+                      key={`${item.legAPropId}-${item.legBPropId}-${item.correlationCoefficient}`}
+                      className="flex items-center justify-between text-text-muted"
+                    >
+                      <span>{item.rationale}</span>
+                      <span className="font-telemetry font-bold text-accent-amber">
+                        {item.correlationCoefficient.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -284,6 +363,15 @@ function DrawerContent({
             <span className="text-text-muted">Decimal Multiple:</span>
             <span className="font-telemetry font-bold text-text-primary">
               {slip.isValidParlay ? `${parseFloat(slip.combinedDecimalOdds).toFixed(2)}x` : "—"}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-text-muted">Fair Probability:</span>
+            <span className="font-telemetry font-bold text-text-primary">
+              {slip.isValidParlay
+                ? `${(parseFloat(slip.combinedFairProbability) * 100).toFixed(2)}%`
+                : "—"}
             </span>
           </div>
 

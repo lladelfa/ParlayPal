@@ -310,3 +310,32 @@ def sync_market_browser_feed(
             close_fn = getattr(active_redis, "close", None)
             if callable(close_fn):
                 close_fn()
+
+
+@celery_app.task(name="parlaypal_worker.price_sgp_event")
+def price_sgp_event(
+    event_id: str,
+    legs: Sequence[dict[str, Any]],
+    *,
+    sport_key: str = "americanfootball_nfl",
+    redis_client: RedisLike | None = None,
+) -> dict[str, Any]:
+    """Price Same-Game Parlay selections, audit intra-game correlation, and cache to Redis."""
+    from parlaypal_worker.sgp import SgpLegSelection, price_sgp
+
+    owns_redis = redis_client is None
+    active_redis = redis_client if redis_client is not None else get_redis_client()
+    try:
+        parsed_legs = [SgpLegSelection(**leg) for leg in legs]
+        response = price_sgp(
+            event_id=event_id,
+            sport_key=sport_key,
+            legs=parsed_legs,
+            redis_client=active_redis,
+        )
+        return response.model_dump(mode="json")
+    finally:
+        if owns_redis:
+            close_fn = getattr(active_redis, "close", None)
+            if callable(close_fn):
+                close_fn()

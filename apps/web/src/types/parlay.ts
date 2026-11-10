@@ -32,6 +32,30 @@ export interface ParlayLeg {
   isHighValue?: boolean;
 }
 
+export interface SgpCorrelationAuditItem {
+  legAPropId: string;
+  legBPropId: string;
+  legADescription?: string;
+  legBDescription?: string;
+  correlationCoefficient: number;
+  synergyType: "positive" | "negative" | "neutral";
+  rationale: string;
+}
+
+export interface SgpPriceResponse {
+  eventId: string;
+  sportKey: string;
+  unadjustedFairProbability: string;
+  sgpFairProbability: string;
+  sgpDecimalOdds: string;
+  sgpAmericanOdds: number;
+  hasPositiveSynergy: boolean;
+  correlationAudit: SgpCorrelationAuditItem[];
+  isSameGameParlay: boolean;
+  source: "api" | "heuristic" | "cache";
+  timestamp?: string;
+}
+
 export interface ParlaySlip {
   legs: ParlayLeg[];
   combinedDecimalOdds: string;
@@ -41,7 +65,10 @@ export interface ParlaySlip {
   hybridValueScore: number;
   isValidParlay: boolean;
   isSameGameParlay: boolean;
+  hasPositiveSynergy?: boolean;
+  sgpFairProbability?: string;
   correlationAudit?: string[];
+  sgpCorrelationAudit?: SgpCorrelationAuditItem[];
 }
 
 export interface ParlayDrawerState {

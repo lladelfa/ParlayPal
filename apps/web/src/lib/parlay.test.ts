@@ -462,3 +462,270 @@ describe("parlay library - converter utilities", () => {
     expect(leg.dateWindow).toBe("tomorrow");
   });
 });
+
+
+describe("parlay library - SGP correlation boost & hybrid valuation (Story 2.3)", () => {
+  it("Scenario 1: Cross-Game Independent parlay has no SGP badge and joint product fair probability", () => {
+    const legA = createMockLeg({
+      propId: "leg_a",
+      eventId: "event_a",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+      hitRateL10: "0.70",
+    });
+    const legB = createMockLeg({
+      propId: "leg_b",
+      eventId: "event_b",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+      hitRateL10: "0.70",
+    });
+
+    const slip = calculateParlaySlip([legA, legB]);
+
+    expect(slip.isSameGameParlay).toBe(false);
+    expect(slip.hasPositiveSynergy).toBeFalsy();
+    expect(slip.combinedDecimalOdds).toBe("3.6447");
+    expect(slip.combinedAmericanOdds).toBe(264);
+    expect(parseFloat(slip.combinedFairProbability)).toBeCloseTo(0.25, 4);
+    expect(parseFloat(slip.combinedEv)).toBeCloseTo(-0.0888, 3);
+  });
+
+  it("Scenario 2: SGP Positive Synergy with boost audit and higher fair probability", () => {
+    const leg1 = createMockLeg({
+      propId: "p_mahomes",
+      eventId: "game_kc_bal",
+      playerName: "Patrick Mahomes",
+      teamAbbreviation: "KC",
+      marketKey: "player_pass_yds",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+      hitRateL10: "0.80",
+    });
+    const leg2 = createMockLeg({
+      propId: "p_kelce",
+      eventId: "game_kc_bal",
+      playerName: "Travis Kelce",
+      teamAbbreviation: "KC",
+      marketKey: "player_receptions",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+      hitRateL10: "0.80",
+    });
+
+    const sgpOverride = {
+      game_kc_bal: {
+        sgpFairProbability: "0.32000",
+        hasPositiveSynergy: true,
+        correlationAudit: [
+          {
+            legAPropId: "p_mahomes",
+            legBPropId: "p_kelce",
+            legADescription: "Patrick Mahomes Over Pass Yds",
+            legBDescription: "Travis Kelce Over Rec",
+            correlationCoefficient: 0.48,
+            synergyType: "positive" as const,
+            rationale: "Teammates QB Passing + Receiver receptions exhibit strong positive synergy.",
+          },
+        ],
+      },
+    };
+
+    const slip = calculateParlaySlip([leg1, leg2], sgpOverride);
+
+    expect(slip.isSameGameParlay).toBe(true);
+    expect(slip.hasPositiveSynergy).toBe(true);
+    expect(slip.sgpFairProbability).toBe("0.32000");
+    expect(parseFloat(slip.combinedFairProbability)).toBeCloseTo(0.32000, 4);
+    expect(parseFloat(slip.combinedFairProbability)).toBeGreaterThan(0.25000);
+    expect(slip.sgpCorrelationAudit).toBeDefined();
+    expect(slip.sgpCorrelationAudit?.length).toBe(1);
+    expect(slip.sgpCorrelationAudit?.[0].correlationCoefficient).toBe(0.48);
+  });
+
+  it("Scenario 3: SGP Negative Cannibalization produces neutral synergy without boost", () => {
+    const leg1 = createMockLeg({
+      propId: "p_henry",
+      eventId: "game_kc_bal",
+      playerName: "Derrick Henry",
+      teamAbbreviation: "BAL",
+      marketKey: "player_rush_yds",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+    });
+    const leg2 = createMockLeg({
+      propId: "p_pacheco",
+      eventId: "game_kc_bal",
+      playerName: "Isiah Pacheco",
+      teamAbbreviation: "KC",
+      marketKey: "player_rush_yds",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+    });
+
+    const sgpOverride = {
+      game_kc_bal: {
+        sgpFairProbability: "0.21000",
+        hasPositiveSynergy: false,
+        correlationAudit: [
+          {
+            legAPropId: "p_henry",
+            legBPropId: "p_pacheco",
+            correlationCoefficient: -0.25,
+            synergyType: "negative" as const,
+            rationale: "Opposing run games compete for possession time.",
+          },
+        ],
+      },
+    };
+
+    const slip = calculateParlaySlip([leg1, leg2], sgpOverride);
+
+    expect(slip.isSameGameParlay).toBe(true);
+    expect(slip.hasPositiveSynergy).toBe(false);
+    expect(parseFloat(slip.combinedFairProbability)).toBeLessThanOrEqual(0.25000);
+  });
+
+  it("Scenario 4: Hybrid Parlay combining 2 legs from SGP Game 1 and 1 leg from Game 2", () => {
+    const leg1 = createMockLeg({
+      propId: "p_mahomes",
+      eventId: "game_1",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50",
+    });
+    const leg2 = createMockLeg({
+      propId: "p_kelce",
+      eventId: "game_1",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50",
+    });
+    const leg3 = createMockLeg({
+      propId: "p_tatum",
+      eventId: "game_2",
+      offeredDecimalOdds: "1.8500",
+      fairProbability: "0.52000",
+      hitRateL10: "0.80",
+    });
+
+    const sgpOverride = {
+      game_1: {
+        sgpFairProbability: "0.30000",
+        hasPositiveSynergy: true,
+      },
+    };
+
+    const slip = calculateParlaySlip([leg1, leg2, leg3], sgpOverride);
+
+    expect(slip.isValidParlay).toBe(true);
+    expect(slip.isSameGameParlay).toBe(true);
+    expect(slip.hasPositiveSynergy).toBe(true);
+
+    // P_total_fair = P_sgp_fair (0.30) * P_indep (0.52) = 0.15600
+    expect(parseFloat(slip.combinedFairProbability)).toBeCloseTo(0.156, 4);
+
+    // Decimal odds: 1.9091 * 1.9091 * 1.85 = 6.7426
+    const expectedDecimal = 1.9091 * 1.9091 * 1.85;
+    expect(parseFloat(slip.combinedDecimalOdds)).toBeCloseTo(expectedDecimal, 3);
+  });
+
+  it("Scenario 5: Live SSE odds delta recalculates combined payout and score dynamically", () => {
+    const leg1 = createMockLeg({
+      propId: "prop-123",
+      offeredDecimalOdds: "1.9000",
+      offeredAmericanOdds: -111,
+      fairProbability: "0.55000",
+      hitRateL10: "0.80",
+    });
+    const leg2 = createMockLeg({
+      propId: "prop-456",
+      offeredDecimalOdds: "2.0000",
+      offeredAmericanOdds: 100,
+      fairProbability: "0.50000",
+      hitRateL10: "0.75",
+    });
+
+    const initialSlip = calculateParlaySlip([leg1, leg2]);
+    expect(initialSlip.combinedDecimalOdds).toBe("3.8000");
+
+    // SSE emits tick: prop-123 odds move 1.90 -> 2.05
+    const updatedSlip = updateSlipLegOdds(initialSlip, "prop-123", 2.05);
+
+    expect(updatedSlip.legs.find((l) => l.propId === "prop-123")?.offeredDecimalOdds).toBe("2.0500");
+    expect(updatedSlip.combinedDecimalOdds).toBe("4.1000");
+    expect(updatedSlip.combinedAmericanOdds).toBe(310);
+  });
+});
+
+  it("preserves hasPositiveSynergy: true and boosted sgpFairProbability during updateSlipLegOdds with sgpOverrides", () => {
+    const leg1 = createMockLeg({
+      propId: "p_mahomes",
+      eventId: "game_kc_bal",
+      playerName: "Patrick Mahomes",
+      teamAbbreviation: "KC",
+      marketKey: "player_pass_yds",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+    });
+    const leg2 = createMockLeg({
+      propId: "p_kelce",
+      eventId: "game_kc_bal",
+      playerName: "Travis Kelce",
+      teamAbbreviation: "KC",
+      marketKey: "player_receptions",
+      selection: "OVER",
+      offeredDecimalOdds: "1.9091",
+      fairProbability: "0.50000",
+    });
+
+    const sgpOverrides = {
+      game_kc_bal: {
+        sgpFairProbability: "0.32000",
+        hasPositiveSynergy: true,
+      },
+    };
+
+    const initialSlip = calculateParlaySlip([leg1, leg2], sgpOverrides);
+    expect(initialSlip.hasPositiveSynergy).toBe(true);
+    expect(initialSlip.sgpFairProbability).toBe("0.32000");
+
+    // Live SSE odds tick: leg1 offered odds shift from 1.9091 to 2.1000
+    const updatedSlip = updateSlipLegOdds(initialSlip, "p_mahomes", 2.10, sgpOverrides);
+
+    expect(updatedSlip.isSameGameParlay).toBe(true);
+    expect(updatedSlip.hasPositiveSynergy).toBe(true);
+    expect(updatedSlip.sgpFairProbability).toBe("0.32000");
+    expect(parseFloat(updatedSlip.combinedFairProbability)).toBeCloseTo(0.32000, 4);
+    expect(updatedSlip.combinedDecimalOdds).toBe((2.10 * 1.9091).toFixed(4));
+  });
+
+  it("calculates empirical positive correlation for Under teammate passing and receiving props", () => {
+    const leg1 = createMockLeg({
+      propId: "p_mahomes_under",
+      eventId: "game_kc_bal",
+      playerName: "Patrick Mahomes",
+      teamAbbreviation: "KC",
+      marketKey: "player_pass_yds",
+      selection: "UNDER",
+      fairProbability: "0.50000",
+    });
+    const leg2 = createMockLeg({
+      propId: "p_kelce_under",
+      eventId: "game_kc_bal",
+      playerName: "Travis Kelce",
+      teamAbbreviation: "KC",
+      marketKey: "player_receptions",
+      selection: "UNDER",
+      fairProbability: "0.50000",
+    });
+
+    const slip = calculateParlaySlip([leg1, leg2]);
+    expect(slip.isSameGameParlay).toBe(true);
+    expect(slip.hasPositiveSynergy).toBe(true);
+    expect(slip.sgpCorrelationAudit?.[0].correlationCoefficient).toBe(0.40);
+    expect(slip.sgpCorrelationAudit?.[0].synergyType).toBe("positive");
+  });
