@@ -35,6 +35,7 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-11: Best Book Price Comparison** — Compare payout odds across integrated sportsbooks (DraftKings, FanDuel, BetMGM, Caesars) for selected legs and highlight the book offering the highest payout.
 - **FR-12: Seamless Bet Logging & Auto-Staging** — Users can save any parlay in their Parlay Drawer with 1 tap, and triggering a QuickPick handoff automatically stages the bet into the user's pending ledger with non-intrusive confirmation.
 - **FR-13: Asynchronous CLV Stamping** — Query closing sharp odds 10 minutes post-commence time for every leg in a tracked bet, calculate CLV% against execution odds, and stamp the result onto the bet record.
+- **FR-14: Automated Upstream Schedule, Prop Ingestion & Beat Orchestration** — Periodically poll upstream NFL and NBA game schedules, teams, and two-way player prop odds (with a deterministic local seed fallback when offline/unconfigured), upsert into PostgreSQL 16, and execute a 30-second Celery Beat schedule so the 45-second Redis hot caches (`markets:browser:*`, `presets:feed:*`, `ev:feed:*`) and SSE stream stay continuously updated.
 
 ### NonFunctional Requirements
 
@@ -77,6 +78,7 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-11:** Epic 3 — Best Book Price Comparison
 - **FR-12:** Epic 4 — 1-Tap Bet Logging
 - **FR-13:** Epic 4 — Asynchronous CLV Stamping
+- **FR-14:** Epic 5 — Automated Upstream Schedule, Prop Ingestion & Beat Orchestration
 
 ## Epic List
 
@@ -95,6 +97,10 @@ Bettors can compare payout prices across major sportsbooks to identify the best 
 ### Epic 4: Bet Tracking & Closing Line Value (CLV) Ledger
 Bettors have their placed wagers seamlessly tracked upon sportsbook handoff and receive automated Closing Line Value calculations against post-commence sharp closing prices to measure their long-term edge.
 **FRs covered:** FR-12, FR-13
+
+### Epic 5: Live Schedule & Prop Ingestion Pipeline
+Bettors and local developers see continuously updated, current NFL and NBA game slates and player prop markets without relying on static UI fallbacks, powered by an automated upstream schedule/odds poller, deterministic local seed fallback, and a 30-second Celery Beat synchronization loop that keeps the 45-second Redis hot caches warm.
+**FRs covered:** FR-14
 
 
 ## Epic 1: Curated Preset Parlays & Value Feed
@@ -290,3 +296,22 @@ So that I have empirical proof that my betting strategy is generating sustainabl
 **When** viewing the Bet Tracker Analytics view,
 **Then** the UI displays the user's overall "Closing Line Beat Rate" (e.g. `68% of bets beat closing line`),
 **And** displays average CLV% gain alongside standard win/loss ROI.
+
+
+## Epic 5: Live Schedule & Prop Ingestion Pipeline
+
+Bettors and local developers see continuously updated, current NFL and NBA game slates and player prop markets without relying on static UI fallbacks, powered by an automated upstream schedule/odds poller, deterministic local seed fallback, and a 30-second Celery Beat synchronization loop that keeps the 45-second Redis hot caches warm.
+
+### Story 5.1: Automated Upstream Schedule, Prop Ingestion & Beat Orchestration
+
+As a bettor (and developer running ParlayPal locally),
+I want the Python worker to automatically fetch current NFL and NBA game schedules and player prop odds (or seed realistic upcoming games relative to current UTC time when offline) and refresh Redis feeds on a 30-second Celery Beat schedule,
+So that all upcoming games, curated presets, and market browser slates stay continuously updated without expiring into static fallback data.
+
+**Acceptance Criteria:**
+
+**Given** the Python worker and Celery Beat service are running,
+**When** the periodic schedule and prop ingestion cycle executes (every 30 seconds, within the 45-second Redis TTL),
+**Then** the worker fetches upcoming NFL and NBA events, teams, and two-way player prop markets from the upstream provider (`PARLAY_API_BASE_URL` / `PARLAY_API_KEY`) or populates/refreshes a deterministic local slate anchored to `datetime.now(UTC)` when the upstream API is unreachable or unconfigured,
+**And** upserts `teams`, `events` (transitioning past-commence games to `COMMENCED`), and devigged `player_props` in PostgreSQL 16,
+**And** runs `sync_preset_parlay_feed` and `sync_market_browser_feed` to refresh `presets:feed:*` and `markets:browser:*` in Redis with a 45-second TTL and broadcast live odds deltas over `odds:feed:{sport_key}`.
