@@ -238,4 +238,50 @@ describe("GET /api/presets", () => {
       isThreat: false,
     });
   });
+
+  it("passes null hit-rate display through (both key styles) without coercing to empty string", async () => {
+    const fakeClient = new FakeRedisClient();
+    const mk = (legExtra: Record<string, unknown>) => ({
+      generated_at: "2026-11-15T19:36:42Z",
+      cards: [
+        {
+          preset_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          title: "No History",
+          sport_key: "nfl",
+          theme_badge: "NFL",
+          combined_decimal_odds: "3.8025",
+          combined_american_odds: 280,
+          combined_fair_probability: "0.28500",
+          combined_ev: "0.0837",
+          hybrid_value_score: 60,
+          commence_time: "2026-11-16T01:15:00Z",
+          legs: [
+            {
+              prop_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+              player_name: "Null Leg",
+              matchup: "A @ B",
+              ...legExtra,
+            },
+          ],
+        },
+      ],
+    });
+    setRedisClientFactory(() => fakeClient);
+
+    fakeClient.store.set(
+      "presets:feed:all",
+      JSON.stringify(mk({ hit_rate_display: null, sofascore_form: [], sofascore_dots: "" })),
+    );
+    let body = await (await GET(new Request("http://localhost:3000/api/presets"))).json();
+    expect(body.cards[0].legs[0].hitRateDisplay).toBeNull();
+    expect(body.cards[0].legs[0].sofascoreForm).toEqual([]);
+
+    fakeClient.store.set("presets:feed:all", JSON.stringify(mk({ hitRateDisplay: null })));
+    body = await (await GET(new Request("http://localhost:3000/api/presets"))).json();
+    expect(body.cards[0].legs[0].hitRateDisplay).toBeNull();
+
+    fakeClient.store.set("presets:feed:all", JSON.stringify(mk({})));
+    body = await (await GET(new Request("http://localhost:3000/api/presets"))).json();
+    expect(body.cards[0].legs[0].hitRateDisplay).toBeNull();
+  });
 });

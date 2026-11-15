@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FALLBACK_MARKET_BROWSER_FEED,
   filterMarketProps,
+  normalizeMarketBrowserFeed,
   recalculateMarketPropRow,
 } from "./markets";
 
@@ -56,5 +57,37 @@ describe("markets library", () => {
     expect(parseFloat(updated.guardedEv)).toBeGreaterThan(0);
     expect(updated.hybridValueScore).toBeGreaterThanOrEqual(0);
     expect(updated.hybridValueScore).toBeLessThanOrEqual(100);
+  });
+
+  it("normalizes null/missing hit-rate display to null with empty dots (both key styles)", () => {
+    const base = {
+      propId: "p1",
+      eventId: "e1",
+      playerName: "Test Player",
+    };
+    const variants: Record<string, unknown>[] = [
+      { ...base, hitRateDisplay: null },
+      { prop_id: "p1", event_id: "e1", player_name: "T", hit_rate_display: null },
+      { ...base },
+    ];
+    for (const row of variants) {
+      const feed = normalizeMarketBrowserFeed({ props: [row] });
+      const prop = feed!.props[0];
+      expect(prop.hitRateDisplay).toBeNull();
+      expect(prop.sofascoreDots).toBe("");
+    }
+  });
+
+  it("recalculation with null hitRateL10 is EV-only and never HIGH_VALUE", () => {
+    const sample = {
+      ...FALLBACK_MARKET_BROWSER_FEED.props[0],
+      hitRateL10: null,
+      fairProbability: "0.5000",
+    };
+    const updated = recalculateMarketPropRow(sample, 2.08);
+    // EV = 0.04 -> EV component = 0.04 * 1000 + 50 = 90
+    expect(updated.hybridValueScore).toBe(90);
+    expect(updated.valueTier).not.toBe("HIGH_VALUE");
+    expect(updated.isHighValue).toBe(false);
   });
 });

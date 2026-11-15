@@ -1,5 +1,5 @@
 import type { MarketPropRow, SportFilter, DateWindowFilter, MarketFilter } from "@/types/market";
-import { decimalToAmerican } from "@/lib/math";
+import { computeHybridValueScore, decimalToAmerican } from "@/lib/math";
 
 export const CANONICAL_MARKETS_BY_SPORT: Record<"nfl" | "nba", Record<string, string>> = {
   nfl: {
@@ -76,14 +76,15 @@ export function recalculateMarketPropRow(
   const newEv = fairProb * newDecimalOdds - 1.0;
   const newEvStr = newEv.toFixed(5);
 
-  const l10 = prop.hitRateL10 ? parseFloat(prop.hitRateL10) : 0.7;
-  const hitPct = l10 * 100.0;
-  const evComp = Math.max(0.0, Math.min(100.0, newEv * 100.0 * 10.0 + 50.0));
-  const newScore = Math.max(0, Math.min(100, Math.round(0.6 * hitPct + 0.4 * evComp)));
+  const newScore = computeHybridValueScore([prop], newEv);
+  const l10 =
+    prop.hitRateL10 === null || prop.hitRateL10 === undefined || prop.hitRateL10 === ""
+      ? NaN
+      : Number(prop.hitRateL10);
 
   // Enforce Outlier Guard (EV <= 10.0%) during live SSE recalculations
   const isOutlier = newEv > 0.10;
-  const isHighVal = !isOutlier && newEv >= 0.035 && l10 >= 0.7;
+  const isHighVal = !isOutlier && newEv >= 0.035 && Number.isFinite(l10) && l10 >= 0.7;
   const tier: "STANDARD" | "POSITIVE_VALUE" | "HIGH_VALUE" = isHighVal
     ? "HIGH_VALUE"
     : !isOutlier && newEv >= 0.015

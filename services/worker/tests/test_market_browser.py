@@ -386,6 +386,21 @@ def test_value_tier_standard_below_positive_threshold() -> None:
     assert feed.props[0].is_high_value is False
 
 
+def test_missing_hit_rate_is_honest_and_never_high_value() -> None:
+    home, away = _team("AAA", "basketball_nba"), _team("BBB", "basketball_nba")
+    event = _event("basketball_nba", home, away, NOW_UTC + timedelta(hours=3), is_dome=True)
+    prop = _prop(event, "player_points", guarded_ev=Decimal("0.0600"), hit_rate_l10=None)
+    feed = build_market_browser_feed(
+        props=[prop], events_map={event.event_id: event}, teams_map={}, now_utc=NOW_UTC
+    )
+    item = feed.props[0]
+    assert item.hit_rate_display is None
+    assert item.sofascore_form == []
+    assert item.sofascore_dots == ""
+    assert item.value_tier != "HIGH_VALUE"
+    assert item.is_high_value is False
+
+
 def test_prop_rows_carry_full_telemetry(slate: dict[str, Any]) -> None:
     feed = _build(slate)
     by_id = {p.prop_id: p for p in feed.props}

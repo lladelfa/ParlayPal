@@ -34,3 +34,13 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `c:\Users\llade\Documents\GitHub\ParlayPal\_bmad-output\implementation-artifacts\spec-5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration.md`
   summary: Update pre-existing `PresetFeed` SSE listener in `apps/web` to handle unnamed default `onmessage` `OddsDeltaFrame` payloads (`quotes` array) emitted by `/api/stream/odds`.
   evidence: `git log -n 2` (`97adb43`, `9a5a054`) confirms `apps/web/src/components/PresetFeed.tsx:45-59` is pre-existing and only subscribes to named `"odds_delta"` events expecting top-level camelCase `propId`/`decimalOdds`, whereas `/api/stream/odds/route.ts:126` emits unnamed `data:` frames carrying snake_case `quotes` (already handled in `MarketBrowser.tsx` and `ParlayDrawerContext.tsx`); `spec-5-1` prohibits modifying `apps/web`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge.md`
+  summary: Add render tests for the "Limited history" badge in LegSwapperModal, MarketBrowser and ParlayDrawer.
+  evidence: Only PresetCard has a render test; reverting the `?? "Limited history"` fallback in the others passes all tests.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge.md`
+  summary: Purge or version-gate the 24h presets Redis snapshot after deploying 6.1 so pre-fix fabricated hit rates are not served.
+  evidence: `sync_preset_feed_to_redis` snapshot fallback persists feeds written before this fix.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge.md`
+  summary: Mark web fallback fixture feeds as sample data in the UI and recompute fixture card-level scores.
+  evidence: Fixtures keep real-looking odds/EV and card hybridValueScore values derived from the old 70-80% hit rates.

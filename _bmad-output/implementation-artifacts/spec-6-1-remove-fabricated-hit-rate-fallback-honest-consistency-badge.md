@@ -2,7 +2,8 @@
 title: 'Story 6.1: Remove Fabricated Hit-Rate Fallback & Honest Consistency Badge'
 type: 'bugfix'
 created: '2026-11-15'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: '5758f7d81293f981b7c701887bf2c56e40964a86'
 route: 'dispatch'
 context:
   - '{project-root}/_bmad-output/planning-artifacts/epics.md'
@@ -91,3 +92,18 @@ context:
 - `npm --prefix apps/web run typecheck` -- expected: 0 errors
 - `npm --prefix apps/web test -- --run` -- expected: all pass
 - `npm --prefix apps/web run build` -- expected: success
+
+## Review Triage Log
+
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| No test for market_browser missing-L10 path (Verification Gap, Blind, Edge) | medium | patch | Reverting the fix there leaves all tests green. |
+| Web callers (parlay/math/market-filters) and market normalizer untested with null rate | medium | patch | Reverting to 0.70 default or `coerceString` leaves tests green. |
+| `caplog` unasserted; vacuous partial-history test | low | patch | Direct test corrections. |
+| Sort key `hit_rate_l10 or 0` ranks missing equal to real 0 | low | patch | Truthiness against the `is None` rule; ordering only. |
+| "Limited history" untested in LegSwapperModal/MarketBrowser/ParlayDrawer | low | defer | One-line fallbacks; no component render test infra. |
+| Persisted 24h Redis snapshot may serve pre-fix fabricated legs | medium | defer | Deploy/ops concern, not caused by this diff. |
+| Fixture feeds keep live-looking odds/EV/card scores | low | defer | Matrix row 7 only requires no consistency claims; sample banner is a separate feature. |
+| Rotation window with all-missing legs is skipped; fewer than 3 cards possible | false | rejected | Spec Decisions explicitly require skipping; partial feeds were already possible. |
+| Placeholder form dots / invented hit counts for real rates | false | rejected | Intent excludes it (Story 6.3). |
+| Partial-coverage indicator, label wording, duplicated parsing, keyword rationale matching, whitespace/out-of-range rates, dots default for real legs, ParlayDrawer undefined | low/false | rejected | Spec decisions, negligible, or worker always supplies the field. |

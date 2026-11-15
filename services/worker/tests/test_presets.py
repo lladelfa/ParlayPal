@@ -491,3 +491,172 @@ def test_sync_preset_feed_to_redis() -> None:
     assert "presets:feed:all" in mock_redis.store
     assert mock_redis.ttls.get("presets:feed:all") == 45
     assert "The Red Zone Express" in mock_redis.store["presets:feed:all"]
+
+
+# --- Story 6.1: no fabricated hit-rate fallback -------------------------------------------
+
+
+def _make_leg(hit_rate_l10: Decimal | None, name: str = "P") -> PresetLeg:
+    return PresetLeg(
+        prop_id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        player_name=name,
+        matchup="A @ B",
+        market_key="player_points",
+        market_display="Over 22.5 Points",
+        offered_decimal_odds=Decimal("1.9000"),
+        offered_american_odds=-111,
+        fair_probability=Decimal("0.5500"),
+        guarded_ev=Decimal("0.0450"),
+        hit_rate_l10=hit_rate_l10,
+        hit_rate_display=None if hit_rate_l10 is None else "x",
+        conviction_rationale="r",
+    )
+
+
+def _slate(
+    hit_rates: list[Decimal | None], market_key: str = "player_points"
+) -> tuple[list[PlayerProp], dict[uuid.UUID, Event], datetime]:
+    now_utc = datetime.now(UTC)
+    props: list[PlayerProp] = []
+    events: dict[uuid.UUID, Event] = {}
+    for i, rate in enumerate(hit_rates):
+        event_id = uuid.uuid4()
+        events[event_id] = Event(
+            event_id=event_id,
+            external_provider_id=f"papi_event_{i}",
+            sport_key="nba",
+            commence_time=now_utc + timedelta(hours=i + 2),
+            status="SCHEDULED",
+            home_team_id=uuid.uuid4(),
+            away_team_id=uuid.uuid4(),
+        )
+        props.append(
+            PlayerProp(
+                prop_id=uuid.uuid4(),
+                external_provider_id=f"papi_prop_{i}",
+                event_id=event_id,
+                player_name=f"Player {i}",
+                market_key=market_key,
+                selection="OVER",
+                line_value=Decimal("22.5"),
+                offered_decimal_odds=Decimal("1.8500"),
+                sharp_decimal_odds=Decimal("1.8000"),
+                fair_probability=Decimal("0.5700"),
+                guarded_ev=Decimal("0.0545"),
+                status="ACTIVE",
+                hit_rate_l10=rate,
+            )
+        )
+    return props, events, now_utc
+
+
+def _all_legs(feed: CuratedPresetFeed) -> list[PresetLeg]:
+    return [leg for card in feed.cards for leg in card.legs]
+
+
+def test_real_hit_rate_display_and_dots_unchanged() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    legs = _all_legs(feed)
+    assert legs
+    for leg in legs:
+        assert leg.hit_rate_display == "7/10 (70.0%) L10"
+        assert leg.sofascore_form == [True, True, False, True, True]
+        assert leg.sofascore_dots == "🟢🟢🔴🟢🟢"
+        assert "7/10 (70.0%) L10" in leg.conviction_rationale
+
+
+def test_missing_hit_rate_leg_is_honest() -> None:
+    props, events, now = _slate([Decimal("0.8"), None, Decimal("0.6")])
+    feed = generate_curated_presets(props, events, now_utc=now)
+    missing = [leg for leg in _all_legs(feed) if leg.hit_rate_l10 is None]
+    assert missing
+    for leg in missing:
+        assert leg.hit_rate_display is None
+        assert leg.sofascore_form == []
+        assert leg.sofascore_dots == ""
+        assert "70.0%" not in leg.conviction_rationale
+        assert "/10" not in leg.conviction_rationale
+
+
+def test_zero_hit_rate_is_real() -> None:
+    props, events, now = _slate([Decimal("0"), Decimal("0"), Decimal("0")])
+    feed = generate_curated_presets(props, events, now_utc=now)
+    legs = _all_legs(feed)
+    assert legs
+    for leg in legs:
+        assert leg.hit_rate_display == "0/10 (0.0%) L10"
+        assert leg.hit_rate_l10 == Decimal("0")
+
+
+def test_missing_history_td_rationale_makes_no_past_claim() -> None:
+    text = generate_conviction_rationale(
+        player_name="Carter Runyon",
+        market_key="player_anytime_td",
+        matchup="A @ B",
+        hit_rate_formatted=None,
+    )
+    assert "has scored" not in text
+    assert "/10" not in text
+    assert "Carter Runyon" in text
+    assert "A @ B" in text
+
+
+@pytest.mark.parametrize(
+    "market_key",
+    [
+        "player_pass_yds",
+        "player_rush_yds",
+        "player_points",
+        "player_rebounds",
+        "player_threes",
+        "player_other",
+        "player_anytime_td",
+    ],
+)
+def test_missing_history_rationale_all_markets(market_key: str) -> None:
+    text = generate_conviction_rationale(
+        player_name="X", market_key=market_key, matchup="A @ B", hit_rate_formatted=None
+    )
+    assert text
+    assert "None" not in text
+    assert "/10" not in text
+
+
+def test_mixed_history_score_uses_only_real_legs() -> None:
+    legs = [_make_leg(Decimal("0.6")), _make_leg(Decimal("0.8")), _make_leg(None)]
+    card = PresetCard.create(
+        preset_id=uuid.uuid4(), title="t", sport_key="nba", theme_badge="b", legs=legs
+    )
+    expected = calculate_hybrid_value_score(Decimal("0.7"), card.combined_ev)
+    assert card.hybrid_value_score == expected
+
+
+def test_no_history_preset_not_emitted(caplog: pytest.LogCaptureFixture) -> None:
+    props, events, now = _slate([None] * 6)
+    with caplog.at_level("INFO"):
+        feed = generate_curated_presets(props, events, now_utc=now)
+    assert feed.cards == []
+    assert any("Skipping preset" in r.message for r in caplog.records)
+
+
+def test_partial_history_pool_never_emits_all_missing_card() -> None:
+    props, events, now = _slate([Decimal("0.7"), None, None, None, None, None])
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert feed.cards
+    for card in feed.cards:
+        assert any(leg.hit_rate_l10 is not None for leg in card.legs)
+
+
+def test_score_without_any_hit_rate_is_ev_only() -> None:
+    legs = [_make_leg(None), _make_leg(None)]
+    card = PresetCard.create(
+        preset_id=uuid.uuid4(), title="t", sport_key="nba", theme_badge="b", legs=legs
+    )
+    ev_pct = float(card.combined_ev) * 100.0
+    expected = max(0, min(100, int(round(max(0.0, min(100.0, ev_pct * 10.0 + 50.0))))))
+    assert card.hybrid_value_score == expected
+    assert calculate_hybrid_value_score(None, Decimal("0.0")) == 50
+    assert calculate_hybrid_value_score(None, Decimal("0.5")) == 100
+    assert calculate_hybrid_value_score(None, Decimal("-0.5")) == 0
