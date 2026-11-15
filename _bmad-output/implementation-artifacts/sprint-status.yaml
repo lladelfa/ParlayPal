@@ -67,4 +67,13 @@ development_status:
   5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration: review
   epic-5-retrospective: optional
 
+  epic-6: backlog
+  6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge: ready-for-dev
+  6-2-selection-aware-hit-rate-for-under-legs: backlog
+  6-3-real-recent-form-dots-from-game-logs: backlog
+  6-4-evidence-based-conviction-rationale: backlog
+  6-5-game-log-ingestion-for-upstream-players: backlog
+  6-6-preset-candidate-quality-gate-dedup: backlog
+  epic-6-retrospective: optional
+
 action_items: []
