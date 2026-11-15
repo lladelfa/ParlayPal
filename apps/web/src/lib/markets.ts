@@ -1,16 +1,196 @@
-import type { MarketBrowserFeed } from "@/types/market";
+import type {
+  MarketBrowserFeed,
+  MarketPropRow,
+  ScheduledEventSummary,
+  ValueTier,
+} from "@/types/market";
 import { createRedisClient, marketsBrowserKey } from "@/lib/redis";
 import {
   CANONICAL_MARKETS_BY_SPORT,
   filterMarketProps,
   recalculateMarketPropRow,
 } from "./market-filters";
+import {
+  coerceNullableNumber,
+  coerceNullableString,
+  coerceNumber,
+  coerceString,
+  normalizeWeatherBadge,
+} from "./presets";
 
 export {
   CANONICAL_MARKETS_BY_SPORT,
   filterMarketProps,
   recalculateMarketPropRow,
 };
+
+type JsonRecord = Record<string, unknown>;
+
+function pickField(obj: JsonRecord, camel: string, snake: string): unknown {
+  return obj[camel] !== undefined ? obj[camel] : obj[snake];
+}
+
+function normalizeMarketPropRow(raw: unknown): MarketPropRow | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  const propId = coerceString(pickField(obj, "propId", "prop_id"));
+  const eventId = coerceString(pickField(obj, "eventId", "event_id"));
+  const playerName = coerceString(pickField(obj, "playerName", "player_name"));
+  if (!propId || !eventId || !playerName) {
+    return null;
+  }
+  const rawSport = coerceString(
+    pickField(obj, "sportKey", "sport_key"),
+    "nfl",
+  ).toLowerCase();
+  const rawSel = coerceString(obj.selection, "OVER").toUpperCase();
+  const rawForm = pickField(obj, "sofascoreForm", "sofascore_form");
+  const rawWindow = coerceString(
+    pickField(obj, "dateWindow", "date_window"),
+    "today",
+  );
+  const dateWindow =
+    rawWindow === "tomorrow" || rawWindow === "weekend" ? rawWindow : "today";
+  const valueTier = coerceString(
+    pickField(obj, "valueTier", "value_tier"),
+    "POSITIVE_VALUE",
+  ) as ValueTier;
+
+  return {
+    propId,
+    eventId,
+    sportKey: rawSport.includes("nba") ? "nba" : "nfl",
+    playerName,
+    teamAbbreviation: coerceString(
+      pickField(obj, "teamAbbreviation", "team_abbreviation"),
+      "TBD",
+    ),
+    matchup: coerceString(obj.matchup),
+    commenceTime: coerceString(
+      pickField(obj, "commenceTime", "commence_time"),
+      new Date().toISOString(),
+    ),
+    dateWindow,
+    marketKey: coerceString(pickField(obj, "marketKey", "market_key")),
+    marketLabel: coerceString(pickField(obj, "marketLabel", "market_label")),
+    marketDisplay: coerceString(pickField(obj, "marketDisplay", "market_display")),
+    selection: rawSel === "UNDER" ? "UNDER" : "OVER",
+    lineValue: coerceNullableNumber(pickField(obj, "lineValue", "line_value")),
+    offeredDecimalOdds: coerceString(
+      pickField(obj, "offeredDecimalOdds", "offered_decimal_odds"),
+      "1.9000",
+    ),
+    offeredAmericanOdds: coerceNumber(
+      pickField(obj, "offeredAmericanOdds", "offered_american_odds"),
+      -110,
+    ),
+    sharpDecimalOdds: coerceNullableString(
+      pickField(obj, "sharpDecimalOdds", "sharp_decimal_odds"),
+    ),
+    sharpAmericanOdds: coerceNullableNumber(
+      pickField(obj, "sharpAmericanOdds", "sharp_american_odds"),
+    ),
+    fairProbability: coerceString(
+      pickField(obj, "fairProbability", "fair_probability"),
+      "0.50000",
+    ),
+    guardedEv: coerceString(pickField(obj, "guardedEv", "guarded_ev"), "0.00000"),
+    hitRateL5: coerceNullableString(pickField(obj, "hitRateL5", "hit_rate_l5")),
+    hitRateL10: coerceNullableString(pickField(obj, "hitRateL10", "hit_rate_l10")),
+    hitRateSeason: coerceNullableString(
+      pickField(obj, "hitRateSeason", "hit_rate_season"),
+    ),
+    hitRateDisplay: coerceString(
+      pickField(obj, "hitRateDisplay", "hit_rate_display"),
+    ),
+    sofascoreForm: Array.isArray(rawForm) ? rawForm.map(Boolean) : [],
+    sofascoreDots: coerceString(
+      pickField(obj, "sofascoreDots", "sofascore_dots"),
+      "⚪⚪⚪⚪⚪",
+    ),
+    weatherBadge: normalizeWeatherBadge(
+      pickField(obj, "weatherBadge", "weather_badge"),
+    ),
+    hybridValueScore: coerceNumber(
+      pickField(obj, "hybridValueScore", "hybrid_value_score"),
+      0,
+    ),
+    status: "ACTIVE",
+    valueTier,
+    isHighValue: Boolean(pickField(obj, "isHighValue", "is_high_value")),
+  };
+}
+
+function normalizeGameSummary(raw: unknown): ScheduledEventSummary | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  const eventId = coerceString(pickField(obj, "eventId", "event_id"));
+  if (!eventId) {
+    return null;
+  }
+  const rawSport = coerceString(
+    pickField(obj, "sportKey", "sport_key"),
+    "nfl",
+  ).toLowerCase();
+  const rawWindow = coerceString(
+    pickField(obj, "dateWindow", "date_window"),
+    "today",
+  );
+  return {
+    eventId,
+    sportKey: rawSport.includes("nba") ? "nba" : "nfl",
+    matchup: coerceString(obj.matchup),
+    homeTeamAbbreviation: coerceString(
+      pickField(obj, "homeTeamAbbreviation", "home_team_abbreviation"),
+    ),
+    awayTeamAbbreviation: coerceString(
+      pickField(obj, "awayTeamAbbreviation", "away_team_abbreviation"),
+    ),
+    commenceTime: coerceString(
+      pickField(obj, "commenceTime", "commence_time"),
+      new Date().toISOString(),
+    ),
+    dateWindow:
+      rawWindow === "tomorrow" || rawWindow === "weekend" ? rawWindow : "today",
+    propCount: coerceNumber(pickField(obj, "propCount", "prop_count"), 0),
+    topHybridValueScore: coerceNumber(
+      pickField(obj, "topHybridValueScore", "top_hybrid_value_score"),
+      0,
+    ),
+  };
+}
+
+export function normalizeMarketBrowserFeed(raw: unknown): MarketBrowserFeed | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  if (!Array.isArray(obj.props)) {
+    return null;
+  }
+  const props = obj.props
+    .map(normalizeMarketPropRow)
+    .filter((row): row is MarketPropRow => row !== null);
+  const games = Array.isArray(obj.games)
+    ? obj.games
+        .map(normalizeGameSummary)
+        .filter((game): game is ScheduledEventSummary => game !== null)
+    : [];
+
+  return {
+    generatedAt: coerceString(
+      pickField(obj, "generatedAt", "generated_at"),
+      new Date().toISOString(),
+    ),
+    sportKey: coerceString(pickField(obj, "sportKey", "sport_key"), "all"),
+    props,
+    games,
+  };
+}
 
 export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
   generatedAt: new Date().toISOString(),
@@ -282,22 +462,32 @@ export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
 };
 
 export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBrowserFeed> {
+  let redis: ReturnType<typeof createRedisClient> | null = null;
   try {
-    const redis = createRedisClient();
+    redis = createRedisClient();
     if (typeof redis.connect === "function") {
       await redis.connect();
     }
     const key = marketsBrowserKey(sportKey);
-    const cached = await redis.get(key);
+    const snapshotKey = key.replace("markets:browser:", "markets:browser:snapshot:");
+    const cached = (await redis.get(key)) ?? (await redis.get(snapshotKey));
 
     if (cached) {
-      const parsed = JSON.parse(cached) as MarketBrowserFeed;
-      if (parsed && Array.isArray(parsed.props)) {
-        return parsed;
+      const normalized = normalizeMarketBrowserFeed(JSON.parse(cached));
+      if (normalized && Array.isArray(normalized.props)) {
+        return normalized;
       }
     }
   } catch (err) {
     console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback market feed.`);
+  } finally {
+    if (redis) {
+      try {
+        redis.disconnect();
+      } catch {
+        // Ignore disconnect cleanup error
+      }
+    }
   }
 
   if (sportKey && sportKey.toLowerCase().includes("nfl")) {

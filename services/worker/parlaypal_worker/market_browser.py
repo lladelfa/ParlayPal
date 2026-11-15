@@ -526,36 +526,44 @@ def sync_market_browser_to_redis(
     redis_client: RedisLike,
     ttl_seconds: int = HOT_CACHE_TTL_SECONDS,
 ) -> None:
-    """Serialize and write MarketBrowserFeed to Redis keys with 45s TTL.
+    """Serialize and write MarketBrowserFeed to Redis hot (45s) and snapshot (24h) keys.
 
     Writes to:
-    - `markets:browser:all`
-    - `markets:browser:nfl`
-    - `markets:browser:nba`
+    - `markets:browser:all`, `markets:browser:nfl`, `markets:browser:nba`
+    - `markets:browser:snapshot:all`, `markets:browser:snapshot:nfl`, `markets:browser:snapshot:nba`
     """
-    payload_all = feed.model_dump_json(by_alias=True)
-    redis_client.set("markets:browser:all", payload_all, ex=ttl_seconds)
-
-    # NFL slice
+    snapshot_ttl = max(ttl_seconds, 86400)
     nfl_props = [p for p in feed.props if p.sport_key == "nfl"]
     nfl_event_ids = {p.event_id for p in nfl_props}
-    nfl_games = [g for g in feed.games if g.sport_key == "nfl" and g.event_id in nfl_event_ids]
-    feed_nfl = MarketBrowserFeed(
-        generatedAt=feed.generated_at,
-        sportKey="nfl",
-        props=nfl_props,
-        games=nfl_games,
-    )
-    redis_client.set("markets:browser:nfl", feed_nfl.model_dump_json(by_alias=True), ex=ttl_seconds)
-
-    # NBA slice
     nba_props = [p for p in feed.props if p.sport_key == "nba"]
     nba_event_ids = {p.event_id for p in nba_props}
-    nba_games = [g for g in feed.games if g.sport_key == "nba" and g.event_id in nba_event_ids]
-    feed_nba = MarketBrowserFeed(
-        generatedAt=feed.generated_at,
-        sportKey="nba",
-        props=nba_props,
-        games=nba_games,
+
+    slices: tuple[tuple[str, MarketBrowserFeed], ...] = (
+        ("all", feed),
+        (
+            "nfl",
+            MarketBrowserFeed(
+                generatedAt=feed.generated_at,
+                sportKey="nfl",
+                props=nfl_props,
+                games=[
+                    g for g in feed.games if g.sport_key == "nfl" and g.event_id in nfl_event_ids
+                ],
+            ),
+        ),
+        (
+            "nba",
+            MarketBrowserFeed(
+                generatedAt=feed.generated_at,
+                sportKey="nba",
+                props=nba_props,
+                games=[
+                    g for g in feed.games if g.sport_key == "nba" and g.event_id in nba_event_ids
+                ],
+            ),
+        ),
     )
-    redis_client.set("markets:browser:nba", feed_nba.model_dump_json(by_alias=True), ex=ttl_seconds)
+    for suffix, slice_feed in slices:
+        serialized = slice_feed.model_dump_json(by_alias=True)
+        redis_client.set(f"markets:browser:{suffix}", serialized, ex=ttl_seconds)
+        redis_client.set(f"markets:browser:snapshot:{suffix}", serialized, ex=snapshot_ttl)
