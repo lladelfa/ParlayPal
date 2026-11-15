@@ -1922,3 +1922,145 @@ def test_fetch_upstream_empty_sports_and_event_prop_deduplication_and_session_cl
         )
     assert inspect(engine).has_table("player_props")
     engine.dispose()
+
+
+def test_prefix_outcome_names_team_tags_accents_and_two_way_fallback(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    """Prefix Over/Under names with (TEAM) tags, accents, Alex/Alexandre compatibility, and two-way retail sharp fallback parse cleanly."""
+    session, _, _ = db_session
+    fake_redis = FakeRedisClient()
+    fixed_now = datetime(2026, 11, 15, 19, 0, tzinfo=UTC)
+
+    # 1. Unit checks on _split_outcome_player_and_side
+    assert _split_outcome_player_and_side({"name": "Over Tari Eason (HOU)"}) == (
+        "Tari Eason",
+        "OVER",
+    )
+    assert _split_outcome_player_and_side({"name": "Under Tari Eason (HOU)"}) == (
+        "Tari Eason",
+        "UNDER",
+    )
+    assert _split_outcome_player_and_side({"name": "Over Trae Young"}) == (
+        "Trae Young",
+        "OVER",
+    )
+    assert _split_outcome_player_and_side({"name": "Under Bogdan Bogdanović"}) == (
+        "Bogdan Bogdanović",
+        "UNDER",
+    )
+    assert _split_outcome_player_and_side(
+        {"name": "Over Alex Sarr (WAS)", "description": "Alexandre Sarr"}
+    ) == ("Alexandre Sarr", "OVER")
+    with pytest.raises(ValueError, match="Conflicting"):
+        _split_outcome_player_and_side({"name": "Over Jayson Tatum", "description": "Jaylen Brown"})
+
+    # 2. Direct team tag + diacritic merge + fallback two-way bookmaker (lowest overround) + one-way alt line tolerance
+    home_t = _resolve_team_metadata("Washington Wizards", "basketball_nba", prefix="papi")
+    away_t = _resolve_team_metadata("Houston Rockets", "basketball_nba", prefix="papi")
+    raw_ev: dict[str, Any] = {
+        "id": "148639d161a052f1bf6c66b5f5c4322c",
+        "sport_key": "basketball_nba",
+        "commence_time": (fixed_now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "home_team": "Washington Wizards",
+        "away_team": "Houston Rockets",
+        "bookmakers": [
+            {
+                # Retail-only books on this line -> fallback picks lowest overround two-way book (betmgm: 1/1.91+1/1.91 < draftkings: 1/1.80+1/2.00)
+                "key": "betmgm",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"name": "Over Tari Eason (HOU)", "price": 1.91, "point": 11.5},
+                            {"name": "Under Tari Eason (HOU)", "price": 1.91, "point": 11.5},
+                            # Accented Bogdanović merges with ASCII Bogdanovic from Pinnacle below
+                            {"name": "Under Bogdan Bogdanović", "price": 2.04, "point": 13.5},
+                            {"name": "Over Bogdan Bogdanović", "price": 1.82, "point": 13.5},
+                            # One-way alternate milestone for Bogdan should not fail the valid main line
+                            {"name": "Over Bogdan Bogdanović", "price": 3.50, "point": 19.5},
+                        ],
+                    }
+                ],
+            },
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"name": "Over Tari Eason (HOU)", "price": 2.02, "point": 11.5},
+                            {"name": "Under Tari Eason (HOU)", "price": 1.80, "point": 11.5},
+                            {"name": "Over Trae Young (WAS)", "price": 1.95, "point": 25.5},
+                            {"name": "Under Trae Young (WAS)", "price": 1.87, "point": 25.5},
+                        ],
+                    }
+                ],
+            },
+            {
+                "key": "pinnacle",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"name": "Over Trae Young", "price": 1.90, "point": 25.5},
+                            {"name": "Under Trae Young", "price": 1.92, "point": 25.5},
+                            {"name": "Over Bogdan Bogdanovic", "price": 1.92, "point": 13.5},
+                            {"name": "Under Bogdan Bogdanovic", "price": 1.90, "point": 13.5},
+                            # Standalone one-way Broken Player should still count as malformed
+                            {"name": "Over Broken Prefix Player", "price": 1.90, "point": 9.5},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    extracted, malformed = _extract_props_from_bookmakers(
+        raw_ev,
+        event_external_id="papi_nba_148639d161a052f1bf6c66b5f5c4322c",
+        sport_key="basketball_nba",
+        home_team=home_t,
+        away_team=away_t,
+    )
+    assert malformed == 1  # Only standalone Broken Prefix Player
+    by_player = {p.player_name: p for p in extracted}
+    assert set(by_player.keys()) == {"Tari Eason", "Trae Young", "Bogdan Bogdanović"}
+    # Team resolution from (HOU) & (WAS)
+    assert by_player["Tari Eason"].team_external_id == away_t.external_provider_id
+    assert by_player["Trae Young"].team_external_id == home_t.external_provider_id
+    # Retail fallback picked BetMGM (1.91/1.91) as baseline vs DraftKings best offer (2.02)
+    assert by_player["Tari Eason"].sharp_decimal_odds == Decimal("1.9100")
+    assert by_player["Tari Eason"].opposite_sharp_decimal_odds == Decimal("1.9100")
+    assert by_player["Tari Eason"].offered_decimal_odds == Decimal("2.0200")
+    # Accented + unaccented Bogdanović merged onto Pinnacle sharp baseline with BetMGM's 2.04 Under offer
+    assert by_player["Bogdan Bogdanović"].selection == "UNDER"
+    assert by_player["Bogdan Bogdanović"].offered_decimal_odds == Decimal("2.0400")
+    assert by_player["Bogdan Bogdanović"].sharp_decimal_odds == Decimal("1.9000")
+
+    # 3. Full run_live_slate_sync over mocked HTTP stays source="upstream"
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(
+                200,
+                json=[raw_ev] if "basketball_nba" in str(req.url) else [],
+            )
+        )
+    ) as http_client:
+        result = run_live_slate_sync(
+            session=session,
+            redis_client=fake_redis,
+            http_client=http_client,
+            api_key="test_live_key",
+            base_url="https://api.parlay-api.com/v1",
+            now_utc=fixed_now,
+        )
+    assert result.source == "upstream"
+    assert result.props_evaluated == 3
+    eason_row = session.scalar(select(PlayerProp).where(PlayerProp.player_name == "Tari Eason"))
+    assert eason_row is not None
+    hou_row = session.scalar(
+        select(Team).where(Team.external_provider_id == away_t.external_provider_id)
+    )
+    assert hou_row is not None
+    assert eason_row.team_id == hou_row.team_id

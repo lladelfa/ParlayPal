@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -68,6 +69,7 @@ _SKIP_MAINLINE_MARKETS: frozenset[str] = frozenset(
 )
 _OVER_SIDE_TOKENS: frozenset[str] = frozenset({"over", "yes"})
 _UNDER_SIDE_TOKENS: frozenset[str] = frozenset({"under", "no"})
+_TRAILING_TEAM_TAG_RE = re.compile(r"\s*\(([A-Za-z]{2,4})\)\s*$")
 _ALLOWED_EVENT_STATUSES: frozenset[str] = frozenset(
     {"SCHEDULED", "COMMENCED", "LIVE", "FINAL", "POSTPONED", "CANCELLED"}
 )
@@ -515,6 +517,41 @@ def _resolve_team_metadata(
     )
 
 
+def _strip_team_tag(raw_player: str) -> tuple[str, str | None]:
+    """Strip an optional trailing parenthesized team abbreviation tag such as ' (HOU)'."""
+    cleaned = raw_player.strip()
+    if not cleaned:
+        return "", None
+    match = _TRAILING_TEAM_TAG_RE.search(cleaned)
+    if match is None:
+        return cleaned, None
+    team_abbr = match.group(1).upper()
+    player_without_tag = cleaned[: match.start()].strip()
+    return player_without_tag, team_abbr
+
+
+def _normalize_player_key(raw_player: str) -> str:
+    """Normalize player names across optional team tags, accents, and whitespace."""
+    clean_player, _ = _strip_team_tag(raw_player)
+    ascii_text = (
+        unicodedata.normalize("NFKD", clean_player).encode("ascii", "ignore").decode("ascii")
+    )
+    return " ".join(ascii_text.split()).lower()
+
+
+def _player_names_compatible(parsed_player: str, explicit_player: str) -> bool:
+    """Check whether name-derived and explicit player strings refer to the same player."""
+    p_norm = _normalize_player_key(parsed_player)
+    e_norm = _normalize_player_key(explicit_player)
+    if p_norm == e_norm:
+        return True
+    p_parts = p_norm.split()
+    e_parts = e_norm.split()
+    if len(p_parts) == len(e_parts) >= 2 and p_parts[1:] == e_parts[1:]:
+        return p_parts[0].startswith(e_parts[0]) or e_parts[0].startswith(p_parts[0])
+    return False
+
+
 def _resolve_prop_team_external_id(
     *sources: Mapping[str, Any] | None,
     sport_key: str,
@@ -558,6 +595,14 @@ def _resolve_prop_team_external_id(
                 candidate_abbr = _first_present(raw_team_val, "abbreviation", "abbr")
             if candidate_abbr is not None:
                 raw_abbr = str(candidate_abbr).strip()
+        if not raw_abbr:
+            for txt_key in ("name", "description", "player_name", "playerName", "participant"):
+                txt_val = src.get(txt_key)
+                if isinstance(txt_val, str):
+                    _, extracted_tag = _strip_team_tag(txt_val)
+                    if extracted_tag is not None:
+                        raw_abbr = extracted_tag
+                        break
 
     if not _has_nonempty_id(raw_ext) and not raw_name and not raw_abbr and raw_team_mapping is None:
         return None
@@ -696,40 +741,50 @@ def _split_outcome_player_and_side(
         or outcome.get("playerName")
         or outcome.get("participant")
     )
-    explicit_player = str(raw_player or "").strip()
+    explicit_clean, _ = _strip_team_tag(str(raw_player or "").strip())
     name_lower = raw_name.lower()
 
     if name_lower in _OVER_SIDE_TOKENS:
         side: Literal["OVER", "UNDER"] = "OVER"
-        player_name = explicit_player
+        player_name = explicit_clean
     elif name_lower in _UNDER_SIDE_TOKENS:
         side = "UNDER"
-        player_name = explicit_player
+        player_name = explicit_clean
     else:
         matched_side: Literal["OVER", "UNDER"] | None = None
-        parsed_player = ""
-        for token in _OVER_SIDE_TOKENS:
-            suffix = f" {token}"
-            if name_lower.endswith(suffix):
-                matched_side = "OVER"
-                parsed_player = raw_name[: -len(suffix)].strip()
-                break
-        if matched_side is None:
-            for token in _UNDER_SIDE_TOKENS:
+        parsed_player_raw = ""
+        side_groups: tuple[tuple[Literal["OVER", "UNDER"], frozenset[str]], ...] = (
+            ("OVER", _OVER_SIDE_TOKENS),
+            ("UNDER", _UNDER_SIDE_TOKENS),
+        )
+        for token_side, tokens in side_groups:
+            for token in tokens:
                 suffix = f" {token}"
+                prefix = f"{token} "
                 if name_lower.endswith(suffix):
-                    matched_side = "UNDER"
-                    parsed_player = raw_name[: -len(suffix)].strip()
+                    matched_side = token_side
+                    parsed_player_raw = raw_name[: -len(suffix)].strip()
                     break
+                if name_lower.startswith(prefix):
+                    matched_side = token_side
+                    parsed_player_raw = raw_name[len(prefix) :].strip()
+                    break
+            if matched_side is not None:
+                break
+
         if matched_side is None:
             raise ValueError(f"Unrecognized two-way outcome side '{raw_name}'.")
         side = matched_side
-        if parsed_player and explicit_player:
-            if " ".join(parsed_player.split()).lower() != " ".join(explicit_player.split()).lower():
-                raise ValueError(
-                    f"Conflicting player names in outcome: prefix {parsed_player!r} vs description {explicit_player!r}."
-                )
-        player_name = explicit_player or parsed_player
+        parsed_clean, _ = _strip_team_tag(parsed_player_raw)
+        if (
+            parsed_clean
+            and explicit_clean
+            and not _player_names_compatible(parsed_clean, explicit_clean)
+        ):
+            raise ValueError(
+                f"Conflicting player names in outcome: prefix {parsed_clean!r} vs description {explicit_clean!r}."
+            )
+        player_name = explicit_clean or parsed_clean
 
     if not player_name:
         raise ValueError(f"Outcome '{raw_name}' is missing player_name/description.")
@@ -752,6 +807,9 @@ def _extract_props_from_bookmakers(
     # Key: (market_key, player_name_lower, line_value) -> display_player, book_sides
     sharp_quotes: dict[
         tuple[str, str, Decimal | None], list[tuple[int, str, dict[str, Decimal]]]
+    ] = {}
+    fallback_two_way_quotes: dict[
+        tuple[str, str, Decimal | None], list[tuple[Decimal, str, dict[str, Decimal]]]
     ] = {}
     retail_quotes: dict[tuple[str, str, Decimal | None], dict[str, list[Decimal]]] = {}
     player_display_names: dict[tuple[str, str, Decimal | None], str] = {}
@@ -787,7 +845,7 @@ def _extract_props_from_bookmakers(
                     continue
                 try:
                     player_name, side = _split_outcome_player_and_side(outcome)
-                    raw_point = outcome.get("point")
+                    raw_point = _first_present(outcome, "point", "line", "line_value", "handicap")
                     line_val = _parse_optional_decimal(raw_point)
                     if line_val is None and "td" in market_key:
                         line_val = Decimal("0.50")
@@ -811,7 +869,7 @@ def _extract_props_from_bookmakers(
                     )
                     continue
 
-                gk = (player_name.lower(), line_val)
+                gk = (_normalize_player_key(player_name), line_val)
                 if gk in conflicted_in_book:
                     continue
                 if gk not in grouped_in_book:
@@ -861,15 +919,29 @@ def _extract_props_from_bookmakers(
                     bucket = retail_quotes.setdefault(full_key, {"OVER": [], "UNDER": []})
                     for side_key, price in sides.items():
                         bucket[side_key].append(price)
+                    if "OVER" in sides and "UNDER" in sides:
+                        try:
+                            evaluate_two_way_prop(sides["OVER"], sides["UNDER"], sides["OVER"])
+                        except DeviggingError:
+                            pass
+                        else:
+                            overround = (Decimal("1") / sides["OVER"]) + (
+                                Decimal("1") / sides["UNDER"]
+                            )
+                            fallback_two_way_quotes.setdefault(full_key, []).append(
+                                (overround, book_key, sides)
+                            )
 
     extracted: list[IngestedProp] = []
+    resolved_player_markets: set[tuple[str, str]] = set()
+    missing_two_way_keys: list[tuple[str, str, str, Decimal | None]] = []
     all_keys = sorted(
         set(sharp_quotes.keys()) | set(retail_quotes.keys()),
         key=lambda item: (item[0], item[1], str(item[2])),
     )
 
     for full_key in all_keys:
-        market_key, _, line_val = full_key
+        market_key, player_lower, line_val = full_key
         player_name = player_display_names[full_key]
         candidates = sorted(sharp_quotes.get(full_key, []), key=lambda x: x[0])
 
@@ -885,14 +957,22 @@ def _extract_props_from_bookmakers(
                     continue
 
         if selected_sharp is None:
-            malformed_count += 1
-            logger.warning(
-                "Skipping prop %s (%s) on %s: missing valid two-way sharp quote.",
-                player_name,
-                market_key,
-                event_external_id,
+            fallback_candidates = sorted(
+                fallback_two_way_quotes.get(full_key, []), key=lambda x: x[0]
             )
+            for _, _, sides in fallback_candidates:
+                try:
+                    evaluate_two_way_prop(sides["OVER"], sides["UNDER"], sides["OVER"])
+                    selected_sharp = sides
+                    break
+                except DeviggingError:
+                    continue
+
+        if selected_sharp is None:
+            missing_two_way_keys.append((market_key, player_lower, player_name, line_val))
             continue
+
+        resolved_player_markets.add((market_key, player_lower))
 
         retail_sides = retail_quotes.get(full_key, {})
         over_offers = retail_sides.get("OVER", [])
@@ -946,6 +1026,16 @@ def _extract_props_from_bookmakers(
                 opposite_sharp_decimal_odds=sharp_opposite,
             )
         )
+
+    for market_key, player_lower, player_name, _ in missing_two_way_keys:
+        if (market_key, player_lower) not in resolved_player_markets:
+            malformed_count += 1
+            logger.warning(
+                "Skipping prop %s (%s) on %s: missing valid two-way sharp quote.",
+                player_name,
+                market_key,
+                event_external_id,
+            )
 
     return extracted, malformed_count
 
