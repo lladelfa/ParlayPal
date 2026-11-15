@@ -305,4 +305,460 @@ describe("REST API /api/bets and /api/bets/[id]", () => {
     const stored = JSON.parse(fakeClient.store.get(userBetsKey(userId)) || "[]");
     expect(stored).toHaveLength(0);
   });
+
+  describe("CLV Benchmark Persistence, Validation & Analytics Metrics", () => {
+    it("GET /api/bets returns CLV analytics and edge distribution metrics while excluding staged and >10% outliers", async () => {
+      const fakeClient = new FakeRedisClient();
+      const userId = "u0000000-0000-4000-8000-000000000099";
+      const bets: TrackedBet[] = [
+        {
+          ...sampleBet,
+          betId: "clv-api-1",
+          userId,
+          sportsbook: "FanDuel",
+          status: "pending",
+          stakeAmount: 50,
+          clvPercentage: 4.0,
+          legs: [{ ...sampleLeg, sportKey: "nfl", marketKey: "player_pass_yds" }],
+        },
+        {
+          ...sampleBet,
+          betId: "clv-api-2",
+          userId,
+          sportsbook: "DraftKings",
+          status: "won",
+          stakeAmount: 25,
+          clvPercentage: 2.0,
+          legs: [
+            { ...sampleLeg, sportKey: "nfl", marketKey: "player_pass_yds" },
+            {
+              propId: "nba-1",
+              playerName: "Nikola Jokic",
+              marketDisplay: "Points Over 26.5",
+              selection: "OVER",
+              offeredDecimalOdds: 1.91,
+              sportKey: "nba",
+              marketKey: "player_points",
+            },
+          ],
+        },
+        {
+          ...sampleBet,
+          betId: "clv-api-3",
+          userId,
+          sportsbook: "BetMGM",
+          status: "lost",
+          stakeAmount: 25,
+          clvPercentage: -3.0,
+          legs: [
+            {
+              propId: "nba-2",
+              playerName: "Jayson Tatum",
+              marketDisplay: "Points Over 27.5",
+              selection: "OVER",
+              offeredDecimalOdds: 1.91,
+              sportKey: "nba",
+              marketKey: "player_points",
+            },
+          ],
+        },
+        {
+          ...sampleBet,
+          betId: "clv-api-staged",
+          userId,
+          status: "staged",
+          stakeAmount: 100,
+          clvPercentage: 5.0,
+        },
+        {
+          ...sampleBet,
+          betId: "clv-api-outlier",
+          userId,
+          status: "won",
+          stakeAmount: 100,
+          clvPercentage: 12.5,
+        },
+      ];
+
+      fakeClient.store.set(userBetsKey(userId), JSON.stringify(bets));
+      setRedisClientFactory(() => fakeClient);
+
+      const res = await GET(new Request(`http://localhost:3000/api/bets?userId=${userId}`));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.metrics.clvTrackedCount).toBe(3);
+      expect(body.metrics.clvBeatCount).toBe(2);
+      expect(body.metrics.closingLineBeatRate).toBe(66.67);
+      expect(body.metrics.averageClvPercentage).toBe(1.75);
+      expect(body.metrics.unweightedAverageClvPercentage).toBe(1);
+      expect(body.metrics.bySport.map((b: { label: string }) => b.label)).toEqual([
+        "NFL",
+        "NBA",
+        "Multi-Sport",
+      ]);
+      expect(body.metrics.bySportsbook).toHaveLength(3);
+    });
+
+    it("POST /api/bets persists and quantizes valid optional CLV fields", async () => {
+      const fakeClient = new FakeRedisClient();
+      setRedisClientFactory(() => fakeClient);
+
+      const req = new Request("http://localhost:3000/api/bets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: "user-clv-post",
+          sportsbook: "FanDuel",
+          decimalOdds: 2.5,
+          stakeAmount: 50,
+          legs: [sampleLeg],
+          closingDecimalOdds: 2.381234,
+          closingFairProb: 0.421234,
+          clvPercentage: 5.3085,
+        }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.bet.closingDecimalOdds).toBe(2.3812);
+      expect(body.bet.closingFairProb).toBe(0.42123);
+      expect(body.bet.clvPercentage).toBe(5.309);
+    });
+
+    it("POST /api/bets rejects clvPercentage > 10.0 with SUSPECT_STALE_LINE and invalid CLV with INVALID_CLV", async () => {
+      const fakeClient = new FakeRedisClient();
+      setRedisClientFactory(() => fakeClient);
+
+      const resSuspect = await POST(
+        new Request("http://localhost:3000/api/bets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sportsbook: "FanDuel",
+            decimalOdds: 2.5,
+            stakeAmount: 50,
+            legs: [sampleLeg],
+            clvPercentage: 12.5,
+          }),
+        }),
+      );
+      expect(resSuspect.status).toBe(400);
+      const bodySuspect = await resSuspect.json();
+      expect(bodySuspect.error.code).toBe("SUSPECT_STALE_LINE");
+
+      const resInvalidProb = await POST(
+        new Request("http://localhost:3000/api/bets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sportsbook: "FanDuel",
+            decimalOdds: 2.5,
+            stakeAmount: 50,
+            legs: [sampleLeg],
+            closingFairProb: 1.0,
+          }),
+        }),
+      );
+      expect(resInvalidProb.status).toBe(400);
+      const bodyInvalidProb = await resInvalidProb.json();
+      expect(bodyInvalidProb.error.code).toBe("INVALID_CLV");
+
+      const resInvalidClv = await POST(
+        new Request("http://localhost:3000/api/bets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sportsbook: "FanDuel",
+            decimalOdds: 2.5,
+            stakeAmount: 50,
+            legs: [sampleLeg],
+            clvPercentage: -1000,
+          }),
+        }),
+      );
+      expect(resInvalidClv.status).toBe(400);
+      const bodyInvalidClv = await resInvalidClv.json();
+      expect(bodyInvalidClv.error.code).toBe("INVALID_CLV");
+    });
+
+    it("PATCH /api/bets/[id] persists valid CLV fields on settlement and rejects >10% or invalid CLV", async () => {
+      const fakeClient = new FakeRedisClient();
+      const userId = sampleBet.userId;
+      const pendingBet: TrackedBet = {
+        ...sampleBet,
+        betId: "patch-clv-bet",
+        status: "pending",
+      };
+      fakeClient.store.set(userBetsKey(userId), JSON.stringify([pendingBet]));
+      setRedisClientFactory(() => fakeClient);
+
+      // Suspect outlier > 10.0%
+      const resSuspect = await PATCH(
+        new Request("http://localhost:3000/api/bets/patch-clv-bet", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            status: "won",
+            clvPercentage: 12.5,
+          }),
+        }),
+        { params: Promise.resolve({ id: "patch-clv-bet" }) },
+      );
+      expect(resSuspect.status).toBe(400);
+      expect((await resSuspect.json()).error.code).toBe("SUSPECT_STALE_LINE");
+
+      // Invalid closingDecimalOdds
+      const resInvalid = await PATCH(
+        new Request("http://localhost:3000/api/bets/patch-clv-bet", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            status: "won",
+            closingDecimalOdds: 1.0,
+          }),
+        }),
+        { params: Promise.resolve({ id: "patch-clv-bet" }) },
+      );
+      expect(resInvalid.status).toBe(400);
+      expect((await resInvalid.json()).error.code).toBe("INVALID_CLV");
+
+      // Valid settlement with CLV
+      const resValid = await PATCH(
+        new Request("http://localhost:3000/api/bets/patch-clv-bet", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            status: "won",
+            closingDecimalOdds: 3.25,
+            closingFairProb: 0.301,
+            clvPercentage: 5.35,
+          }),
+        }),
+        { params: Promise.resolve({ id: "patch-clv-bet" }) },
+      );
+      expect(resValid.status).toBe(200);
+      const bodyValid = await resValid.json();
+      expect(bodyValid.bet.status).toBe("won");
+      expect(bodyValid.bet.closingDecimalOdds).toBe(3.25);
+      expect(bodyValid.bet.closingFairProb).toBe(0.301);
+      expect(bodyValid.bet.clvPercentage).toBe(5.35);
+    });
+
+    it("PATCH /api/bets/[id] preserves existing non-null CLV fields during settlement", async () => {
+      const fakeClient = new FakeRedisClient();
+      const userId = sampleBet.userId;
+      const stampedPending: TrackedBet = {
+        ...sampleBet,
+        betId: "patch-preserve-clv",
+        status: "pending",
+        closingDecimalOdds: 3.1,
+        closingFairProb: 0.305,
+        clvPercentage: 6.75,
+      };
+      fakeClient.store.set(userBetsKey(userId), JSON.stringify([stampedPending]));
+      setRedisClientFactory(() => fakeClient);
+
+      const res = await PATCH(
+        new Request("http://localhost:3000/api/bets/patch-preserve-clv", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            status: "lost",
+            closingDecimalOdds: 2.0,
+            closingFairProb: 0.5,
+            clvPercentage: -2.0,
+          }),
+        }),
+        { params: Promise.resolve({ id: "patch-preserve-clv" }) },
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.bet.status).toBe("lost");
+      expect(body.bet.closingDecimalOdds).toBe(3.1);
+      expect(body.bet.closingFairProb).toBe(0.305);
+      expect(body.bet.clvPercentage).toBe(6.75);
+    });
+  });
+});
+
+
+describe("Story 4.3 Review API Route Regression Tests", () => {
+  function setupMockRedis(initialBets: TrackedBet[] = [], userId = "u-review") {
+    const fakeRedis = new FakeRedisClient();
+    if (initialBets.length > 0) {
+      fakeRedis.store.set(userBetsKey(userId), JSON.stringify(initialBets));
+    }
+    setRedisClientFactory(() => fakeRedis);
+    return fakeRedis;
+  }
+
+  const baseBody = {
+    userId: "u-review",
+    sportsbook: "fanduel",
+    decimalOdds: 2.0,
+    stakeAmount: 50,
+    legs: [
+      {
+        propId: "p-rev-1",
+        playerName: "Josh Allen",
+        marketDisplay: "Pass Yards Over 265.5",
+        line: 265.5,
+        selection: "OVER",
+        offeredDecimalOdds: 2.0,
+      },
+    ],
+  };
+
+  it("rejects JSON null, arrays, and primitives with 400 on POST /api/bets and PATCH /api/bets/[id]", async () => {
+    setupMockRedis();
+
+    for (const invalidPayload of [null, [], ["x"], "string", 42]) {
+      const postRes = await POST(
+        new Request("http://localhost/api/bets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invalidPayload),
+        }),
+      );
+      expect(postRes.status).toBe(400);
+      const postJson = await postRes.json();
+      expect(postJson.error.code).toBe("INVALID_BODY");
+
+      const patchRes = await PATCH(
+        new Request("http://localhost/api/bets/b-missing", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invalidPayload),
+        }),
+        { params: Promise.resolve({ id: "b-missing" }) },
+      );
+      expect(patchRes.status).toBe(400);
+      const patchJson = await patchRes.json();
+      expect(patchJson.error.code).toBe("INVALID_BODY");
+    }
+  });
+
+  it("supports snake_case CLV fields and strips CLV fields when POST status normalizes to staged", async () => {
+    setupMockRedis();
+
+    const snakeRes = await POST(
+      new Request("http://localhost/api/bets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...baseBody,
+          status: "WON",
+          closing_decimal_odds: 1.9,
+          closing_fair_prob: 0.52632,
+          clv_percentage: 5.264,
+        }),
+      }),
+    );
+    expect(snakeRes.status).toBe(201);
+    const snakeJson = await snakeRes.json();
+    expect(snakeJson.bet.status).toBe("won");
+    expect(snakeJson.bet.closingDecimalOdds).toBe(1.9);
+    expect(snakeJson.bet.closingFairProb).toBe(0.52632);
+    expect(snakeJson.bet.clvPercentage).toBe(5.264);
+
+    const stagedRes = await POST(
+      new Request("http://localhost/api/bets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...baseBody,
+          status: "STAGED",
+          closingDecimalOdds: 1.9,
+          closingFairProb: 0.52,
+          clvPercentage: 4.0,
+        }),
+      }),
+    );
+    expect(stagedRes.status).toBe(201);
+    const stagedJson = await stagedRes.json();
+    expect(stagedJson.bet.status).toBe("staged");
+    expect(stagedJson.bet.closingDecimalOdds).toBeUndefined();
+    expect(stagedJson.bet.closingFairProb).toBeUndefined();
+    expect(stagedJson.bet.clvPercentage).toBeUndefined();
+  });
+
+  it("atomically preserves existing CLV snapshot on PATCH whenever any CLV field is non-null", async () => {
+    const existingPartial: TrackedBet = {
+      betId: "b-atomic-clv",
+      userId: "u-review",
+      sportsbook: "fanduel",
+      decimalOdds: 2.0,
+      americanOdds: 100,
+      stakeAmount: 50,
+      potentialPayout: 100,
+      status: "pending",
+      legs: baseBody.legs,
+      quickpickUrl: "",
+      placedAt: "2026-11-14T18:00:00Z",
+      closingFairProb: 0.52,
+    };
+    setupMockRedis([existingPartial]);
+
+    const patchRes = await PATCH(
+      new Request("http://localhost/api/bets/b-atomic-clv", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: "u-review",
+          status: "WON",
+          closingFairProb: 0.4,
+          closingDecimalOdds: 2.5,
+          clvPercentage: -5.0,
+        }),
+      }),
+      { params: Promise.resolve({ id: "b-atomic-clv" }) },
+    );
+    expect(patchRes.status).toBe(200);
+    const patchJson = await patchRes.json();
+    expect(patchJson.bet.status).toBe("won");
+    expect(patchJson.bet.closingFairProb).toBe(0.52);
+    expect(patchJson.bet.closingDecimalOdds).toBeUndefined();
+    expect(patchJson.bet.clvPercentage).toBeUndefined();
+  });
+
+  it("rejects PATCH with ALREADY_SETTLED for uppercase WON and VOID statuses", async () => {
+    const wonBet: TrackedBet = {
+      betId: "b-upper-won",
+      userId: "u-review",
+      sportsbook: "fanduel",
+      decimalOdds: 2.0,
+      americanOdds: 100,
+      stakeAmount: 50,
+      potentialPayout: 100,
+      status: "WON" as any,
+      legs: baseBody.legs,
+      quickpickUrl: "",
+      placedAt: "2026-11-14T18:00:00Z",
+    };
+    const voidBet: TrackedBet = {
+      ...wonBet,
+      betId: "b-upper-void",
+      status: "VOID" as any,
+    };
+    setupMockRedis([wonBet, voidBet]);
+
+    for (const id of ["b-upper-won", "b-upper-void"]) {
+      const res = await PATCH(
+        new Request(`http://localhost/api/bets/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: "u-review", status: "lost" }),
+        }),
+        { params: Promise.resolve({ id }) },
+      );
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error.code).toBe("ALREADY_SETTLED");
+    }
+  });
 });

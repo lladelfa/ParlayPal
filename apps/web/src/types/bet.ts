@@ -87,6 +87,19 @@ export interface TrackedBet {
   liveProgress?: LiveGameProgress;
 }
 
+export type SportEdgeCategory = "NFL" | "NBA" | "Multi-Sport" | "Other";
+
+export interface ClvEdgeBucket {
+  key: string;
+  label: string;
+  trackedCount: number;
+  beatCount: number;
+  beatRate: number;
+  averageClvPercentage: number;
+  unweightedAverageClvPercentage: number;
+  totalStaked: number;
+}
+
 export interface BetSummaryMetrics {
   totalBets: number;
   stagedCount: number;
@@ -99,6 +112,13 @@ export interface BetSummaryMetrics {
   totalReturn: number;
   netProfit: number;
   roi: number;
+  clvTrackedCount: number;
+  clvBeatCount: number;
+  closingLineBeatRate: number;
+  averageClvPercentage: number;
+  unweightedAverageClvPercentage: number;
+  bySport: ClvEdgeBucket[];
+  bySportsbook: ClvEdgeBucket[];
 }
 
 export interface StageBetRequest {
@@ -140,6 +160,7 @@ export type StageBetErrorCode =
   | "INVALID_LEG_DATA"
   | "INVALID_ODDS"
   | "SUSPECT_STALE_LINE"
+  | "INVALID_CLV"
   | "MISSING_REQUIRED_FIELDS"
   | "INTERNAL_ERROR";
 
