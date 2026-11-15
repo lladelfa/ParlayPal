@@ -21,3 +21,8 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-project-ingestion-data-substrate-setup.md`
   summary: Audit database connection pool disposal and pool pre-ping under multi-worker concurrency.
   evidence: In `services/worker/parlaypal_worker/db.py`, `init_db()` constructs an engine and disposes it on error. Multi-process worker deployments running Celery prefork pools will need verification of engine session lifecycles across process forks.
+
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-2-asynchronous-closing-line-value-clv-worker.md`
+  summary: Share a module-level SQLAlchemy Engine/sessionmaker across Celery task invocations instead of calling `create_session_factory()` per task run.
+  evidence: In `services/worker/parlaypal_worker/celery_app.py`, `create_session_factory()()` creates a new SQLAlchemy `Engine` connection pool when `session=None`, which for a 60-second Beat task (`stamp_closing_line_value`) can accumulate idle pooled connections unless a shared engine or `dispose()` is used.

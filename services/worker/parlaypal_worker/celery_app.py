@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from celery import Celery
 from sqlalchemy.orm import Session
 
+from parlaypal_worker.clv import ClosingOddsProviderError, stamp_due_bets
 from parlaypal_worker.config import get_settings
 from parlaypal_worker.db import create_session_factory
 from parlaypal_worker.devig import (
@@ -21,6 +23,8 @@ from parlaypal_worker.redis_client import (
     get_redis_client,
     publish_odds_delta,
 )
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -37,6 +41,12 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    beat_schedule={
+        "stamp-closing-line-value-every-minute": {
+            "task": "parlaypal_worker.stamp_closing_line_value",
+            "schedule": 60.0,
+        },
+    },
 )
 
 
@@ -339,3 +349,44 @@ def price_sgp_event(
             close_fn = getattr(active_redis, "close", None)
             if callable(close_fn):
                 close_fn()
+
+
+@celery_app.task(
+    name="parlaypal_worker.stamp_closing_line_value",
+    autoretry_for=(ClosingOddsProviderError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def stamp_closing_line_value(
+    *,
+    session: Session | None = None,
+    http_client: Any = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Sweep due pending bets (>= 10 min post-commence) and stamp sharp closing-line CLV%."""
+    owns_session = session is None
+    active_session = session if session is not None else create_session_factory()()
+    try:
+        summary = stamp_due_bets(
+            active_session,
+            now=now,
+            http_client=http_client,
+        )
+        return {
+            "status": "ok",
+            "checked_bets": summary.checked_bets,
+            "stamped_bets": summary.stamped_bets,
+            "skipped_suspect": summary.skipped_suspect,
+            "skipped_invalid": summary.skipped_invalid,
+            "skipped_not_due": summary.skipped_not_due,
+            "events_fetched": summary.events_fetched,
+            "timestamp": format_iso8601_utc(summary.processed_at),
+        }
+    except ClosingOddsProviderError as exc:
+        logger.error("CLV worker provider failure (eligible for retry): %s", exc)
+        raise
+    finally:
+        if owns_session:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
