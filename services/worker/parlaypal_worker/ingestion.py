@@ -657,6 +657,14 @@ def _resolve_prop_team_external_id(
     return None
 
 
+_MIN_DECIMAL_ODDS: Decimal = Decimal("1.01")
+_MAX_DECIMAL_ODDS: Decimal = Decimal("9999.9999")
+
+
+class _UnplayableHeavyFavoriteError(ValueError):
+    """Sub-1.01 decimal price on an unplayable heavy-favorite outcome (e.g. 1.004 or -20000)."""
+
+
 def _parse_odds_to_decimal(raw_price: Any) -> Decimal:
     """Convert raw upstream American or Decimal odds into validated Decimal odds [1.01, 9999.9999]."""
     if isinstance(raw_price, bool) or raw_price is None:
@@ -687,9 +695,14 @@ def _parse_odds_to_decimal(raw_price: Any) -> Decimal:
         try:
             dec_val = american_to_decimal(dec_val)
         except DeviggingError as exc:
+            if dec_val <= Decimal("-10000"):
+                raise _UnplayableHeavyFavoriteError(str(exc)) from exc
             raise ValueError(str(exc)) from exc
 
-    if not dec_val.is_finite() or dec_val < Decimal("1.01") or dec_val > Decimal("9999.9999"):
+    if Decimal("1.0") <= dec_val < _MIN_DECIMAL_ODDS:
+        raise _UnplayableHeavyFavoriteError(f"Unplayable heavy-favorite price: {dec_val}")
+
+    if not dec_val.is_finite() or dec_val < _MIN_DECIMAL_ODDS or dec_val > _MAX_DECIMAL_ODDS:
         raise ValueError(f"Decimal price out of bounds: {dec_val}")
     return dec_val.quantize(_ODDS_QUANTIZE, rounding=ROUND_HALF_UP)
 
@@ -804,6 +817,9 @@ def _extract_props_from_bookmakers(
     if not isinstance(raw_bookmakers, Sequence) or isinstance(raw_bookmakers, (str, bytes)):
         return [], 0
 
+    sport_short = normalize_sport_key(sport_key)
+    canonical_markets = CANONICAL_MARKETS_BY_SPORT.get(sport_short, {})
+
     # Key: (market_key, player_name_lower, line_value) -> display_player, book_sides
     sharp_quotes: dict[
         tuple[str, str, Decimal | None], list[tuple[int, str, dict[str, Decimal]]]
@@ -814,6 +830,7 @@ def _extract_props_from_bookmakers(
     retail_quotes: dict[tuple[str, str, Decimal | None], dict[str, list[Decimal]]] = {}
     player_display_names: dict[tuple[str, str, Decimal | None], str] = {}
     player_teams: dict[tuple[str, str, Decimal | None], str] = {}
+    unplayable_full_keys: set[tuple[str, str, Decimal | None]] = set()
     malformed_count = 0
 
     for book in raw_bookmakers:
@@ -830,6 +847,8 @@ def _extract_props_from_bookmakers(
                 continue
             market_key = str(market.get("key") or "").strip().lower()
             if not market_key or market_key in _SKIP_MAINLINE_MARKETS:
+                continue
+            if canonical_markets and market_key not in canonical_markets:
                 continue
             outcomes = market.get("outcomes")
             if not isinstance(outcomes, Sequence) or isinstance(outcomes, (str, bytes)):
@@ -851,7 +870,19 @@ def _extract_props_from_bookmakers(
                         line_val = Decimal("0.50")
                     elif line_val is not None:
                         line_val = line_val.quantize(Decimal("0.01"))
-                    decimal_price = _parse_odds_to_decimal(outcome.get("price"))
+                    try:
+                        decimal_price = _parse_odds_to_decimal(outcome.get("price"))
+                    except _UnplayableHeavyFavoriteError as exc:
+                        unplayable_full_keys.add(
+                            (market_key, _normalize_player_key(player_name), line_val)
+                        )
+                        logger.debug(
+                            "Skipping unplayable heavy-favorite prop outcome in event %s (%s): %s",
+                            event_external_id,
+                            market_key,
+                            exc,
+                        )
+                        continue
                     outcome_team_id = _resolve_prop_team_external_id(
                         outcome,
                         market,
@@ -969,7 +1000,19 @@ def _extract_props_from_bookmakers(
                     continue
 
         if selected_sharp is None:
-            missing_two_way_keys.append((market_key, player_lower, player_name, line_val))
+            if (
+                "td" not in market_key
+                and full_key not in unplayable_full_keys
+                and any(prio == 0 for prio, _, _ in candidates)
+            ):
+                missing_two_way_keys.append((market_key, player_lower, player_name, line_val))
+            else:
+                logger.debug(
+                    "Skipping retail-only or unplayable one-way prop %s (%s) on %s: no valid two-way quote.",
+                    player_name,
+                    market_key,
+                    event_external_id,
+                )
             continue
 
         resolved_player_markets.add((market_key, player_lower))

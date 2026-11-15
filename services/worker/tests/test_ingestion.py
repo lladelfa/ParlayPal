@@ -2064,3 +2064,159 @@ def test_prefix_outcome_names_team_tags_accents_and_two_way_fallback(
     )
     assert hou_row is not None
     assert eason_row.team_id == hou_row.team_id
+
+
+def test_non_canonical_markets_sub_101_alternates_and_retail_one_way_props_skipped_quietly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Non-canonical markets, retail one-way props, and [1.0, 1.01) alternates skip cleanly without WARNING spam."""
+    home_t = _resolve_team_metadata("Arizona Cardinals", "americanfootball_nfl", prefix="papi")
+    away_t = _resolve_team_metadata("Los Angeles Rams", "americanfootball_nfl", prefix="papi")
+
+    raw_nfl_ev: dict[str, Any] = {
+        "id": "489f1621ec78856750d43b0d59981c5c",
+        "sport_key": "americanfootball_nfl",
+        "home_team": "Arizona Cardinals",
+        "away_team": "Los Angeles Rams",
+        "bookmakers": [
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        # Non-canonical NFL market: skipped completely before outcome parsing
+                        "key": "player_anytime_touchdown_scorer",
+                        "outcomes": [
+                            {"name": "Yes", "description": "Matthew Stafford", "price": 5.50},
+                            {"name": "Yes", "description": "Kyren Williams", "price": 1.85},
+                        ],
+                    },
+                    {
+                        # Retail-only one-way anytime TD longshots: skipped quietly without WARNING
+                        "key": "player_anytime_td",
+                        "outcomes": [
+                            {
+                                "name": "Yes",
+                                "description": "Arizona Cardinals Defense",
+                                "price": 7.50,
+                            },
+                            {"name": "Yes", "description": "Carson Beck", "price": 6.00},
+                            {"name": "Yes", "description": "Derrick Henry", "price": 1.95},
+                            {"name": "No", "description": "Derrick Henry", "price": 1.88},
+                        ],
+                    },
+                    {
+                        # Heavy-favorite alternate milestone priced in [1.0, 1.01): skipped quietly
+                        "key": "player_rush_yds",
+                        "outcomes": [
+                            {
+                                "name": "Over",
+                                "description": "Kyren Williams",
+                                "price": 1.004,
+                                "point": 14.5,
+                            },
+                            {
+                                "name": "Over",
+                                "description": "Kyren Williams",
+                                "price": 1.92,
+                                "point": 74.5,
+                            },
+                            {
+                                "name": "Under",
+                                "description": "Kyren Williams",
+                                "price": 1.90,
+                                "point": 74.5,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                "key": "novig",
+                "markets": [
+                    {
+                        # Exchange one-way liquidity without No/Under side skips quietly without WARNING
+                        "key": "player_anytime_td",
+                        "outcomes": [
+                            {
+                                "name": "Yes",
+                                "description": "Brennan Presley",
+                                "price": 27.03,
+                                "point": 0.5,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                "key": "pinnacle",
+                "markets": [
+                    {
+                        "key": "player_rush_yds",
+                        "outcomes": [
+                            {
+                                "name": "Over",
+                                "description": "Kyren Williams",
+                                "price": 1.90,
+                                "point": 74.5,
+                            },
+                            {
+                                "name": "Under",
+                                "description": "Kyren Williams",
+                                "price": 1.92,
+                                "point": 74.5,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    with caplog.at_level(logging.WARNING, logger="parlaypal_worker.ingestion"):
+        extracted, malformed = _extract_props_from_bookmakers(
+            raw_nfl_ev,
+            event_external_id="papi_nfl_489f1621ec78856750d43b0d59981c5c",
+            sport_key="americanfootball_nfl",
+            home_team=home_t,
+            away_team=away_t,
+        )
+
+    assert malformed == 0
+    assert caplog.records == []
+    assert {(p.player_name, p.market_key) for p in extracted} == {
+        ("Derrick Henry", "player_anytime_td"),
+        ("Kyren Williams", "player_rush_yds"),
+    }
+
+    # Truly invalid price < 1.0 (e.g., 0.85) must still emit WARNING and increment malformed_count
+    caplog.clear()
+    invalid_ev: dict[str, Any] = {
+        "id": "invalid_price_ev",
+        "sport_key": "americanfootball_nfl",
+        "bookmakers": [
+            {
+                "key": "fanduel",
+                "markets": [
+                    {
+                        "key": "player_pass_yds",
+                        "outcomes": [
+                            {
+                                "name": "Over",
+                                "description": "Bad Price QB",
+                                "price": 0.85,
+                                "point": 225.5,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    with caplog.at_level(logging.WARNING, logger="parlaypal_worker.ingestion"):
+        _, invalid_malformed = _extract_props_from_bookmakers(
+            invalid_ev,
+            event_external_id="papi_nfl_invalid_price_ev",
+            sport_key="americanfootball_nfl",
+        )
+    assert invalid_malformed == 1
+    assert any("Decimal price out of bounds: 0.85" in rec.message for rec in caplog.records)
