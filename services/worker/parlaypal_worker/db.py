@@ -47,7 +47,21 @@ def create_db_engine(database_url: str | None = None, **kwargs: Any) -> Engine:
     """Create a SQLAlchemy 2.0 Engine instance."""
     resolved_url = database_url or get_settings().database_url
     engine_kwargs: dict[str, Any] = {"pool_pre_ping": True, **kwargs}
-    return create_engine(resolved_url, **engine_kwargs)
+    try:
+        return create_engine(resolved_url, **engine_kwargs)
+    except ImportError as exc:
+        if resolved_url.startswith("postgresql+psycopg://"):
+            fallback_url = resolved_url.replace(
+                "postgresql+psycopg://",
+                "postgresql+pg8000://",
+                1,
+            )
+            logger.warning(
+                "psycopg libpq wrapper unavailable (%s); falling back to pg8000 driver.",
+                exc,
+            )
+            return create_engine(fallback_url, **engine_kwargs)
+        raise
 
 
 def create_session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
@@ -67,7 +81,7 @@ def init_db(engine: Engine | None = None, database_url: str | None = None) -> En
         with target_engine.begin() as connection:
             Base.metadata.create_all(bind=connection, checkfirst=True)
         return target_engine
-    except (SQLAlchemyError, OSError) as exc:
+    except (SQLAlchemyError, OSError, ImportError) as exc:
         if engine is None and target_engine is not None:
             target_engine.dispose()
         logger.error("Failed to initialize ParlayPal database schema: %s", exc)

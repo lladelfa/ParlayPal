@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select
@@ -14,6 +14,14 @@ from sqlalchemy.orm import Session
 from parlaypal_worker.models import UserBet
 
 logger = logging.getLogger(__name__)
+
+CLV_CLOSING_ODDS_QUANTIZE = Decimal("0.0001")
+CLV_FAIR_PROB_QUANTIZE = Decimal("0.00001")
+CLV_PERCENT_QUANTIZE = Decimal("0.001")
+MIN_DECIMAL_ODDS = Decimal("1.01")
+MAX_DECIMAL_ODDS = Decimal("9999.9999")
+MAX_POSITIVE_CLV_PERCENT = Decimal("10.000")
+MIN_CLV_PERCENT = Decimal("-999.999")
 
 VALID_STATUSES = {
     "STAGED",
@@ -275,6 +283,89 @@ def settle_user_bet(
     if commit:
         session.commit()
         session.refresh(user_bet)
+    else:
+        session.flush()
+
+    return user_bet
+
+
+def _parse_finite_decimal(value: Decimal | float | str | int, field_name: str) -> Decimal:
+    """Coerce numeric input to a finite Decimal or raise InvalidBetError."""
+    if isinstance(value, bool) or value is None:
+        raise InvalidBetError(f"Invalid {field_name}: boolean or null values are not permitted.")
+    try:
+        dec = value if isinstance(value, Decimal) else Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise InvalidBetError(f"Invalid {field_name}: {value}") from exc
+    if not dec.is_finite():
+        raise InvalidBetError(f"Invalid {field_name}: {value} must be finite.")
+    return dec
+
+
+def stamp_bet_clv(
+    session: Session,
+    bet_id: uuid.UUID | str,
+    closing_decimal_odds: Decimal | float | str,
+    closing_fair_prob: Decimal | float | str,
+    clv_percentage: Decimal | float | str,
+    *,
+    commit: bool = True,
+) -> UserBet:
+    """Stamp closing-line benchmarks onto a PENDING/pending UserBet without changing status."""
+    user_bet = get_user_bet(session, bet_id)
+    if not user_bet:
+        raise BetNotFoundError(f"Bet with id {bet_id} not found.")
+
+    if user_bet.status not in ("PENDING", "pending"):
+        raise InvalidBetError(f"Cannot stamp CLV on non-pending bet with status: {user_bet.status}")
+
+    if user_bet.clv_percentage is not None:
+        return user_bet
+
+    raw_close = _parse_finite_decimal(closing_decimal_odds, "closing_decimal_odds")
+    if raw_close < MIN_DECIMAL_ODDS or raw_close > MAX_DECIMAL_ODDS:
+        raise InvalidBetError(
+            f"Closing decimal odds ({raw_close}) must satisfy 1.01 <= D <= 9999.9999."
+        )
+    close_q = raw_close.quantize(CLV_CLOSING_ODDS_QUANTIZE, rounding=ROUND_HALF_UP)
+    if close_q < MIN_DECIMAL_ODDS or close_q > MAX_DECIMAL_ODDS:
+        raise InvalidBetError(
+            f"Closing decimal odds ({close_q}) exceed Numeric(8,4) bounds after quantization."
+        )
+
+    raw_prob = _parse_finite_decimal(closing_fair_prob, "closing_fair_prob")
+    if raw_prob <= Decimal("0") or raw_prob >= Decimal("1"):
+        raise InvalidBetError(
+            f"Closing fair probability ({raw_prob}) must be strictly between 0 and 1."
+        )
+    prob_q = raw_prob.quantize(CLV_FAIR_PROB_QUANTIZE, rounding=ROUND_HALF_UP)
+    if prob_q < CLV_FAIR_PROB_QUANTIZE or prob_q > Decimal("0.99999"):
+        raise InvalidBetError(
+            f"Closing fair probability ({prob_q}) must remain in [0.00001, 0.99999] after quantization."
+        )
+
+    raw_clv = _parse_finite_decimal(clv_percentage, "clv_percentage")
+    if raw_clv < MIN_CLV_PERCENT or raw_clv > MAX_POSITIVE_CLV_PERCENT:
+        raise InvalidBetError(
+            f"CLV percentage ({raw_clv}%) exceeds allowed bounds [{MIN_CLV_PERCENT}, {MAX_POSITIVE_CLV_PERCENT}]."
+        )
+    clv_q = raw_clv.quantize(CLV_PERCENT_QUANTIZE, rounding=ROUND_HALF_UP)
+    if clv_q < MIN_CLV_PERCENT or clv_q > MAX_POSITIVE_CLV_PERCENT:
+        raise InvalidBetError(
+            f"CLV percentage ({clv_q}%) exceeds allowed bounds [{MIN_CLV_PERCENT}, {MAX_POSITIVE_CLV_PERCENT}]."
+        )
+
+    user_bet.closing_decimal_odds = close_q
+    user_bet.closing_fair_prob = prob_q
+    user_bet.clv_percentage = clv_q
+
+    if commit:
+        try:
+            session.commit()
+            session.refresh(user_bet)
+        except Exception:
+            session.rollback()
+            raise
     else:
         session.flush()
 

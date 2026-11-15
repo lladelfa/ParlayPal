@@ -30,3 +30,9 @@ build/
 # Local SQLite / test artifacts
 *.db
 *.sqlite3
+
+# Celery Beat local schedule state
+celerybeat-schedule*
+
+# Editor settings
+.vscode/

@@ -8,6 +8,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,9 +19,13 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.schema import CreateTable
 
 from parlaypal_worker import celery_app as celery_app_module
+from parlaypal_worker import config as config_module
+from parlaypal_worker import db as db_module
 from parlaypal_worker.celery_app import health_check, ingest_odds_delta
+from parlaypal_worker.config import WorkerSettings
 from parlaypal_worker.db import (
     DatabaseInitializationError,
+    create_db_engine,
     create_session_factory,
     init_db,
 )
@@ -308,6 +313,43 @@ def test_init_db_connection_error_raises_structured_error_and_logs(
     assert bad_url_exc.value.code == "DB_INIT_FAILED"
 
 
+def test_create_db_engine_falls_back_to_pg8000_on_psycopg_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify postgresql+psycopg:// falls back to postgresql+pg8000:// when libpq is missing."""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_create_engine(url: str, **kwargs: Any) -> Any:
+        calls.append((url, kwargs))
+        if url.startswith("postgresql+psycopg://"):
+            raise ImportError("no pq wrapper available")
+        return create_engine("sqlite:///:memory:")
+
+    monkeypatch.setattr(db_module, "create_engine", fake_create_engine)
+
+    with caplog.at_level(logging.WARNING):
+        engine = create_db_engine(
+            "postgresql+psycopg://parlaypal:parlaypal@localhost:5432/parlaypal",
+            echo=False,
+        )
+
+    assert len(calls) == 2
+    assert calls[0][0] == "postgresql+psycopg://parlaypal:parlaypal@localhost:5432/parlaypal"
+    assert calls[1][0] == "postgresql+pg8000://parlaypal:parlaypal@localhost:5432/parlaypal"
+    assert calls[1][1] == {"pool_pre_ping": True, "echo": False}
+    assert "falling back to pg8000 driver" in caplog.text
+    engine.dispose()
+
+    def always_missing_driver(url: str, **kwargs: Any) -> Any:
+        raise ImportError("missing driver")
+
+    monkeypatch.setattr(db_module, "create_engine", always_missing_driver)
+    with pytest.raises(DatabaseInitializationError) as exc_info:
+        init_db(database_url="postgresql+psycopg://parlaypal:parlaypal@localhost:5432/parlaypal")
+    assert exc_info.value.code == "DB_INIT_FAILED"
+
+
 def test_publish_odds_delta_sets_45s_ttl_and_publishes_iso8601_utc_frame() -> None:
     """Verify hot odds cache uses 45s TTL and Pub/Sub publishes strict ISO 8601 UTC JSON."""
     fake_redis = FakeRedisClient()
@@ -468,3 +510,47 @@ def test_celery_health_check_and_ingest_odds_delta_task(
     assert fake_redis.get(odds_latest_key("basketball_nba", event_id)) == serialized
     assert fake_redis.published == [(odds_feed_channel("basketball_nba"), serialized)]
     assert fake_redis.closed is True
+
+
+def test_worker_settings_reads_repo_and_service_env_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify WorkerSettings checks repo-root .env, service .env, and cwd .env in order."""
+    expected_env_files = (
+        config_module.REPO_ROOT / ".env",
+        config_module.SERVICE_ROOT / ".env",
+        ".env",
+    )
+    assert WorkerSettings.model_config.get("env_file") == expected_env_files
+    assert (config_module.REPO_ROOT / "services" / "worker") == config_module.SERVICE_ROOT
+    assert (config_module.SERVICE_ROOT / "parlaypal_worker" / "config.py").is_file()
+
+    repo_env = tmp_path / "repo" / ".env"
+    service_env = tmp_path / "service" / ".env"
+    cwd_dir = tmp_path / "cwd"
+    repo_env.parent.mkdir()
+    service_env.parent.mkdir()
+    cwd_dir.mkdir()
+
+    repo_env.write_text(
+        "PARLAY_API_KEY=repo_key\nREDIS_URL=redis://repo-host:6379/1\n",
+        encoding="utf-8",
+    )
+    service_env.write_text(
+        "PARLAY_API_KEY=service_key\n",
+        encoding="utf-8",
+    )
+
+    for var_name in ("PARLAY_API_KEY", "REDIS_URL", "DATABASE_URL", "PARLAY_API_BASE_URL"):
+        monkeypatch.delenv(var_name, raising=False)
+    monkeypatch.chdir(cwd_dir)
+    monkeypatch.setitem(
+        WorkerSettings.model_config,
+        "env_file",
+        (repo_env, service_env, ".env"),
+    )
+
+    loaded = WorkerSettings()
+    assert loaded.parlay_api_key == "service_key"
+    assert loaded.redis_url == "redis://repo-host:6379/1"
