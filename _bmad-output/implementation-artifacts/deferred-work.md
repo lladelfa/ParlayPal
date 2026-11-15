@@ -26,3 +26,7 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-2-asynchronous-closing-line-value-clv-worker.md`
   summary: Share a module-level SQLAlchemy Engine/sessionmaker across Celery task invocations instead of calling `create_session_factory()` per task run.
   evidence: In `services/worker/parlaypal_worker/celery_app.py`, `create_session_factory()()` creates a new SQLAlchemy `Engine` connection pool when `session=None`, which for a 60-second Beat task (`stamp_closing_line_value`) can accumulate idle pooled connections unless a shared engine or `dispose()` is used.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-3-clv-analytics-long-term-edge-reporting.md`
+  summary: Preserve newer local bet settlement and simulated CLV fields during mount reconciliation in `BetTrackerDashboard` when the server ledger still holds stale `pending` data (pre-existing Story 4.1 reconciliation effect).
+  evidence: In `apps/web/src/components/BetTrackerDashboard.tsx:185-203`, the mount `useEffect` merges server bets by `id` favoring the server record (`mergeById`), so if a local settlement `PATCH` failed or settled offline while `localStorage` recorded `won`/`lost` and simulated CLV, remounting overwrites the local state with the server's stale `pending` state.

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { type TrackedBet, type BetStatus, VALID_BET_STATUSES } from "@/types/bet";
+import { type TrackedBet, type BetStatus } from "@/types/bet";
+import {
+  isPlainObject,
+  normalizeBetStatusInput,
+  validateClvBenchmarkInput,
+} from "@/lib/ledger";
 import { createRedisClient, userBetsKey } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +31,33 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
       );
     }
 
-    if (body.status !== undefined && !VALID_BET_STATUSES.includes(body.status)) {
+    if (!isPlainObject(body)) {
       return NextResponse.json(
         {
           error: {
-            code: "INVALID_STATUS",
-            message: `Invalid bet status: ${body.status}`,
+            code: "INVALID_BODY",
+            message: "Request body must be an object.",
           },
         },
         { status: 400 },
       );
+    }
+
+    let normalizedBodyStatus: BetStatus | undefined = undefined;
+    if (body.status !== undefined) {
+      const statusCheck = normalizeBetStatusInput(body.status);
+      if (!statusCheck.ok) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "INVALID_STATUS",
+              message: statusCheck.message,
+            },
+          },
+          { status: 400 },
+        );
+      }
+      normalizedBodyStatus = statusCheck.status;
     }
 
     if (body.stakeAmount !== undefined || body.stake !== undefined) {
@@ -51,6 +73,19 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
           { status: 400 },
         );
       }
+    }
+
+    const clvValidation = validateClvBenchmarkInput(body);
+    if (!clvValidation.ok) {
+      return NextResponse.json(
+        {
+          error: {
+            code: clvValidation.code,
+            message: clvValidation.message,
+          },
+        },
+        { status: clvValidation.status },
+      );
     }
 
     const userId =
@@ -80,7 +115,7 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
           "push",
         ]);
 
-        if (finalizedStatuses.has(existingBet.status)) {
+        if (finalizedStatuses.has((existingBet.status || "").trim().toLowerCase())) {
           return NextResponse.json(
             {
               error: {
@@ -92,7 +127,7 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
           );
         }
 
-        const newStatus: BetStatus = body.status || existingBet.status;
+        const newStatus: BetStatus = normalizedBodyStatus ?? existingBet.status;
         const newStake =
           body.stakeAmount !== undefined
             ? Number(body.stakeAmount)
@@ -104,6 +139,24 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
             ? Number(body.potentialPayout)
             : Number((newStake * existingBet.decimalOdds).toFixed(2));
 
+        const hasExistingClv =
+          (existingBet.closingDecimalOdds !== undefined &&
+            existingBet.closingDecimalOdds !== null) ||
+          (existingBet.closingFairProb !== undefined &&
+            existingBet.closingFairProb !== null) ||
+          (existingBet.clvPercentage !== undefined &&
+            existingBet.clvPercentage !== null);
+
+        const nextClosingDecimalOdds = hasExistingClv
+          ? existingBet.closingDecimalOdds
+          : clvValidation.closingDecimalOdds;
+        const nextClosingFairProb = hasExistingClv
+          ? existingBet.closingFairProb
+          : clvValidation.closingFairProb;
+        const nextClvPercentage = hasExistingClv
+          ? existingBet.clvPercentage
+          : clvValidation.clvPercentage;
+
         const updatedBet: TrackedBet = {
           ...existingBet,
           status: newStatus,
@@ -111,12 +164,22 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
           stake: newStake,
           potentialPayout: newPotentialPayout,
           placedAt:
-            existingBet.status === "staged" && newStatus === "pending"
+            (existingBet.status || "").trim().toLowerCase() === "staged" &&
+            (newStatus || "").trim().toLowerCase() === "pending"
               ? new Date().toISOString()
               : existingBet.placedAt,
-          settledAt: finalizedStatuses.has(newStatus)
+          settledAt: finalizedStatuses.has((newStatus || "").trim().toLowerCase())
             ? new Date().toISOString()
             : existingBet.settledAt,
+          ...(nextClosingDecimalOdds !== undefined
+            ? { closingDecimalOdds: nextClosingDecimalOdds }
+            : {}),
+          ...(nextClosingFairProb !== undefined
+            ? { closingFairProb: nextClosingFairProb }
+            : {}),
+          ...(nextClvPercentage !== undefined
+            ? { clvPercentage: nextClvPercentage }
+            : {}),
         };
 
         const updatedList = allBets.map((b) =>

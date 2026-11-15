@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { type TrackedBet, type BetLeg, type BetStatus, VALID_BET_STATUSES } from "@/types/bet";
-import { calculateBetSummaryMetrics, generateUUID } from "@/lib/ledger";
+import { type TrackedBet, type BetLeg, type BetStatus } from "@/types/bet";
+import {
+  calculateBetSummaryMetrics,
+  generateUUID,
+  isPlainObject,
+  normalizeBetStatusInput,
+  validateClvBenchmarkInput,
+} from "@/lib/ledger";
 import { createRedisClient, userBetsKey } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
@@ -111,7 +117,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!body || typeof body !== "object") {
+    if (!isPlainObject(body)) {
       return NextResponse.json(
         {
           error: {
@@ -245,16 +251,21 @@ export async function POST(req: Request) {
       );
     }
 
-    if (body.status !== undefined && !VALID_BET_STATUSES.includes(body.status)) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "INVALID_STATUS",
-            message: `Invalid bet status: ${body.status}`,
+    let normalizedStatus: BetStatus = "pending";
+    if (body.status !== undefined) {
+      const statusCheck = normalizeBetStatusInput(body.status);
+      if (!statusCheck.ok) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "INVALID_STATUS",
+              message: statusCheck.message,
+            },
           },
-        },
-        { status: 400 },
-      );
+          { status: 400 },
+        );
+      }
+      normalizedStatus = statusCheck.status;
     }
 
     if (body.quickpickUrl && typeof body.quickpickUrl === "string") {
@@ -272,6 +283,19 @@ export async function POST(req: Request) {
       }
     }
 
+    const clvValidation = validateClvBenchmarkInput(body);
+    if (!clvValidation.ok) {
+      return NextResponse.json(
+        {
+          error: {
+            code: clvValidation.code,
+            message: clvValidation.message,
+          },
+        },
+        { status: clvValidation.status },
+      );
+    }
+
     const americanOdds =
       body.americanOdds ??
       body.combinedAmericanOdds ??
@@ -286,7 +310,8 @@ export async function POST(req: Request) {
         ? body.userId.trim()
         : generateUUID();
 
-    const status: BetStatus = body.status || "pending";
+    const status: BetStatus = normalizedStatus;
+    const isStaged = status === "staged";
     const potentialPayout =
       body.potentialPayout !== undefined
         ? Number(body.potentialPayout)
@@ -310,6 +335,15 @@ export async function POST(req: Request) {
       stagedAt: body.stagedAt || new Date().toISOString(),
       settledAt: body.settledAt || null,
       liveProgress: body.liveProgress,
+      ...(!isStaged && clvValidation.closingDecimalOdds !== undefined
+        ? { closingDecimalOdds: clvValidation.closingDecimalOdds }
+        : {}),
+      ...(!isStaged && clvValidation.closingFairProb !== undefined
+        ? { closingFairProb: clvValidation.closingFairProb }
+        : {}),
+      ...(!isStaged && clvValidation.clvPercentage !== undefined
+        ? { clvPercentage: clvValidation.clvPercentage }
+        : {}),
     };
 
     // Persist to Redis
