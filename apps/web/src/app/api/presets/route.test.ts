@@ -165,4 +165,77 @@ describe("GET /api/presets", () => {
     const body = await response.json();
     expect(body.cards.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("normalizes snake_case worker payloads and falls back to presets:feed:snapshot:all", async () => {
+    const fakeClient = new FakeRedisClient();
+    const snakeFeed = {
+      generated_at: "2026-11-15T19:36:42Z",
+      cards: [
+        {
+          preset_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          title: "Snapshot Express",
+          sport_key: "nfl",
+          theme_badge: "NFL · 2-Leg Rush",
+          combined_decimal_odds: "3.8025",
+          combined_american_odds: 280,
+          combined_fair_probability: "0.28500",
+          combined_ev: "0.0837",
+          hybrid_value_score: 90,
+          status: "ACTIVE",
+          commence_time: "2026-11-16T01:15:00Z",
+          legs: [
+            {
+              prop_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+              event_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+              player_name: "Jadarian Price",
+              team_abbreviation: "LV",
+              matchup: "LV @ SEA",
+              market_key: "player_rush_yds",
+              market_display: "Under 44.5 Rush Yds",
+              selection: "UNDER",
+              line_value: "44.50",
+              offered_decimal_odds: "1.9500",
+              offered_american_odds: -105,
+              sharp_decimal_odds: "1.8800",
+              sharp_american_odds: -114,
+              fair_probability: "0.53000",
+              guarded_ev: "0.03350",
+              hit_rate_l5: "0.8000",
+              hit_rate_l10: "0.7000",
+              hit_rate_season: "0.7200",
+              hit_rate_display: "7/10 (70.0%) L10",
+              sofascore_form: [true, true, false, true, true],
+              sofascore_dots: "🟢🟢🔴🟢🟢",
+              weather_badge: {
+                badge_type: "CLEAR",
+                summary: "Clear · 48°F",
+                is_threat: false,
+              },
+              conviction_rationale:
+                "Jadarian Price stayed under line in 7 of last 10 games.",
+            },
+          ],
+        },
+      ],
+    };
+
+    fakeClient.store.set("presets:feed:snapshot:all", JSON.stringify(snakeFeed));
+    setRedisClientFactory(() => fakeClient);
+
+    const response = await GET(new Request("http://localhost:3000/api/presets"));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.generatedAt).toBe("2026-11-15T19:36:42Z");
+    expect(body.cards).toHaveLength(1);
+    expect(body.cards[0].presetId).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    expect(body.cards[0].themeBadge).toBe("NFL · 2-Leg Rush");
+    expect(body.cards[0].combinedAmericanOdds).toBe(280);
+    expect(body.cards[0].legs[0].playerName).toBe("Jadarian Price");
+    expect(body.cards[0].legs[0].lineValue).toBe(44.5);
+    expect(body.cards[0].legs[0].weatherBadge).toEqual({
+      badgeType: "CLEAR",
+      summary: "Clear · 48°F",
+      isThreat: false,
+    });
+  });
 });

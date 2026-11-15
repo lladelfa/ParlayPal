@@ -503,22 +503,31 @@ def sync_preset_feed_to_redis(
     redis_client: Any,
     ttl_seconds: int = 45,
 ) -> None:
-    """Serialize CuratedPresetFeed and write to Redis keys with 45-second TTL.
+    """Serialize CuratedPresetFeed and write to Redis hot (45s) and snapshot (24h) keys.
 
     Writes to:
-    - `presets:feed:all`
-    - `presets:feed:nfl`
-    - `presets:feed:nba`
+    - `presets:feed:all`, `presets:feed:nfl`, `presets:feed:nba`
+    - `presets:feed:snapshot:all`, `presets:feed:snapshot:nfl`, `presets:feed:snapshot:nba`
     """
-    payload_all = feed.model_dump_json()
-    redis_client.set("presets:feed:all", payload_all, ex=ttl_seconds)
-
-    # Filter and cache by sport
-    nfl_cards = [c for c in feed.cards if c.sport_key == "nfl"]
-    nba_cards = [c for c in feed.cards if c.sport_key == "nba"]
-
-    feed_nfl = CuratedPresetFeed(generated_at=feed.generated_at, cards=nfl_cards)
-    feed_nba = CuratedPresetFeed(generated_at=feed.generated_at, cards=nba_cards)
-
-    redis_client.set("presets:feed:nfl", feed_nfl.model_dump_json(), ex=ttl_seconds)
-    redis_client.set("presets:feed:nba", feed_nba.model_dump_json(), ex=ttl_seconds)
+    snapshot_ttl = max(ttl_seconds, 86400)
+    slices: tuple[tuple[str, CuratedPresetFeed], ...] = (
+        ("all", feed),
+        (
+            "nfl",
+            CuratedPresetFeed(
+                generated_at=feed.generated_at,
+                cards=[c for c in feed.cards if c.sport_key == "nfl"],
+            ),
+        ),
+        (
+            "nba",
+            CuratedPresetFeed(
+                generated_at=feed.generated_at,
+                cards=[c for c in feed.cards if c.sport_key == "nba"],
+            ),
+        ),
+    )
+    for suffix, slice_feed in slices:
+        serialized = slice_feed.model_dump_json()
+        redis_client.set(f"presets:feed:{suffix}", serialized, ex=ttl_seconds)
+        redis_client.set(f"presets:feed:snapshot:{suffix}", serialized, ex=snapshot_ttl)

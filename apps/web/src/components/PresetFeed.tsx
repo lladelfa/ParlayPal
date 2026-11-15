@@ -42,21 +42,52 @@ export function PresetFeed({ initialCards }: PresetFeedProps) {
         }
       });
 
-      eventSource.addEventListener("odds_delta", (event) => {
+      const handleOddsUpdate = (rawMessage: string) => {
         if (!isMounted) return;
         try {
-          const delta = JSON.parse(event.data);
-          if (delta && delta.propId && delta.decimalOdds) {
-            const newOdds = parseFloat(delta.decimalOdds);
+          const payload = JSON.parse(rawMessage);
+          const deltas: { propId: string; newOdds: number }[] = [];
+          const flatPropId = payload?.propId ?? payload?.prop_id;
+          const flatOdds = payload?.decimalOdds ?? payload?.decimal_odds;
+          if (flatPropId && flatOdds !== undefined && flatOdds !== null) {
+            const parsed = parseFloat(String(flatOdds));
+            if (Number.isFinite(parsed) && parsed >= 1.01) {
+              deltas.push({ propId: String(flatPropId), newOdds: parsed });
+            }
+          } else if (Array.isArray(payload?.quotes)) {
+            for (const q of payload.quotes) {
+              const pid = q?.propId ?? q?.prop_id;
+              const odds = q?.decimalOdds ?? q?.decimal_odds;
+              if (pid && odds !== undefined && odds !== null) {
+                const parsed = parseFloat(String(odds));
+                if (Number.isFinite(parsed) && parsed >= 1.01) {
+                  deltas.push({ propId: String(pid), newOdds: parsed });
+                }
+              }
+            }
+          }
+
+          if (deltas.length > 0) {
             setCards((prevCards) =>
-              prevCards.map((c) => recalculatePresetCard(c, delta.propId, newOdds))
+              prevCards.map((card) => {
+                let updated = card;
+                for (const d of deltas) {
+                  updated = recalculatePresetCard(updated, d.propId, d.newOdds);
+                }
+                return updated;
+              }),
             );
             setLastTickTime(new Date().toLocaleTimeString());
           }
         } catch {
           // Ignore malformed SSE frames
         }
-      });
+      };
+
+      eventSource.onmessage = (event) => handleOddsUpdate(event.data);
+      eventSource.addEventListener("odds_delta", (event) =>
+        handleOddsUpdate((event as MessageEvent).data),
+      );
 
       eventSource.addEventListener("error", () => {
         if (isMounted) {

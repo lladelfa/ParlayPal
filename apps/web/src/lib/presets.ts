@@ -1,8 +1,197 @@
-import type { CuratedPresetFeed, PresetCard } from "@/types/preset";
+import type {
+  CuratedPresetFeed,
+  PresetCard,
+  PresetLeg,
+  WeatherBadge,
+} from "@/types/preset";
 import { createRedisClient, presetsFeedKey } from "@/lib/redis";
 import { decimalToAmerican, recalculatePresetCard } from "./math";
 
 export { decimalToAmerican, recalculatePresetCard };
+
+type JsonRecord = Record<string, unknown>;
+
+function pickField(obj: JsonRecord, camel: string, snake: string): unknown {
+  return obj[camel] !== undefined ? obj[camel] : obj[snake];
+}
+
+export function coerceNullableNumber(val: unknown): number | null {
+  if (val === null || val === undefined || val === "") {
+    return null;
+  }
+  const num = typeof val === "number" ? val : Number(val);
+  return Number.isFinite(num) ? num : null;
+}
+
+export function coerceString(val: unknown, fallback = ""): string {
+  if (val === null || val === undefined) {
+    return fallback;
+  }
+  return String(val);
+}
+
+export function coerceNullableString(val: unknown): string | null {
+  if (val === null || val === undefined || val === "") {
+    return null;
+  }
+  return String(val);
+}
+
+export function coerceNumber(val: unknown, fallback = 0): number {
+  const num = coerceNullableNumber(val);
+  return num ?? fallback;
+}
+
+export function normalizeWeatherBadge(raw: unknown): WeatherBadge | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  const badgeType = coerceString(
+    pickField(obj, "badgeType", "badge_type"),
+    "CLEAR",
+  ) as WeatherBadge["badgeType"];
+  return {
+    badgeType,
+    summary: coerceString(obj.summary),
+    isThreat: Boolean(pickField(obj, "isThreat", "is_threat")),
+  };
+}
+
+function normalizePresetLeg(raw: unknown): PresetLeg | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  const propId = coerceString(pickField(obj, "propId", "prop_id"));
+  const eventId = coerceString(pickField(obj, "eventId", "event_id"));
+  const playerName = coerceString(pickField(obj, "playerName", "player_name"));
+  if (!propId || !playerName) {
+    return null;
+  }
+  const rawForm = pickField(obj, "sofascoreForm", "sofascore_form");
+  const sofascoreForm = Array.isArray(rawForm) ? rawForm.map(Boolean) : [];
+  const rawSel = coerceString(obj.selection, "OVER").toUpperCase();
+
+  return {
+    propId,
+    eventId,
+    playerName,
+    teamAbbreviation: coerceString(
+      pickField(obj, "teamAbbreviation", "team_abbreviation"),
+      "TBD",
+    ),
+    matchup: coerceString(obj.matchup),
+    marketKey: coerceString(pickField(obj, "marketKey", "market_key")),
+    marketDisplay: coerceString(pickField(obj, "marketDisplay", "market_display")),
+    selection: rawSel === "UNDER" ? "UNDER" : "OVER",
+    lineValue: coerceNullableNumber(pickField(obj, "lineValue", "line_value")),
+    offeredDecimalOdds: coerceString(
+      pickField(obj, "offeredDecimalOdds", "offered_decimal_odds"),
+      "1.9000",
+    ),
+    offeredAmericanOdds: coerceNumber(
+      pickField(obj, "offeredAmericanOdds", "offered_american_odds"),
+      -110,
+    ),
+    sharpDecimalOdds: coerceNullableString(
+      pickField(obj, "sharpDecimalOdds", "sharp_decimal_odds"),
+    ),
+    sharpAmericanOdds: coerceNullableNumber(
+      pickField(obj, "sharpAmericanOdds", "sharp_american_odds"),
+    ),
+    fairProbability: coerceString(
+      pickField(obj, "fairProbability", "fair_probability"),
+      "0.5000",
+    ),
+    guardedEv: coerceString(pickField(obj, "guardedEv", "guarded_ev"), "0.0000"),
+    hitRateL5: coerceNullableString(pickField(obj, "hitRateL5", "hit_rate_l5")),
+    hitRateL10: coerceNullableString(pickField(obj, "hitRateL10", "hit_rate_l10")),
+    hitRateSeason: coerceNullableString(
+      pickField(obj, "hitRateSeason", "hit_rate_season"),
+    ),
+    hitRateDisplay: coerceString(
+      pickField(obj, "hitRateDisplay", "hit_rate_display"),
+    ),
+    sofascoreForm,
+    sofascoreDots: coerceString(
+      pickField(obj, "sofascoreDots", "sofascore_dots"),
+      "⚪⚪⚪⚪⚪",
+    ),
+    weatherBadge: normalizeWeatherBadge(
+      pickField(obj, "weatherBadge", "weather_badge"),
+    ),
+    convictionRationale: coerceString(
+      pickField(obj, "convictionRationale", "conviction_rationale"),
+    ),
+  };
+}
+
+export function normalizeCuratedPresetFeed(raw: unknown): CuratedPresetFeed | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  if (!Array.isArray(obj.cards)) {
+    return null;
+  }
+  const cards: PresetCard[] = [];
+  for (const rawCard of obj.cards) {
+    if (!rawCard || typeof rawCard !== "object") {
+      continue;
+    }
+    const c = rawCard as JsonRecord;
+    const rawLegs = Array.isArray(c.legs) ? c.legs : [];
+    const legs = rawLegs
+      .map(normalizePresetLeg)
+      .filter((leg): leg is PresetLeg => leg !== null);
+    const presetId = coerceString(pickField(c, "presetId", "preset_id"));
+    const title = coerceString(c.title);
+    if (!presetId || !title || legs.length === 0) {
+      continue;
+    }
+    const rawSport = coerceString(
+      pickField(c, "sportKey", "sport_key"),
+      "nfl",
+    ).toLowerCase();
+    cards.push({
+      presetId,
+      title,
+      sportKey: rawSport.includes("nba") ? "nba" : "nfl",
+      themeBadge: coerceString(pickField(c, "themeBadge", "theme_badge")),
+      legs,
+      combinedDecimalOdds: coerceString(
+        pickField(c, "combinedDecimalOdds", "combined_decimal_odds"),
+        "2.0000",
+      ),
+      combinedAmericanOdds: coerceNumber(
+        pickField(c, "combinedAmericanOdds", "combined_american_odds"),
+        100,
+      ),
+      combinedFairProbability: coerceString(
+        pickField(c, "combinedFairProbability", "combined_fair_probability"),
+        "0.50000",
+      ),
+      combinedEv: coerceString(pickField(c, "combinedEv", "combined_ev"), "0.0000"),
+      hybridValueScore: coerceNumber(
+        pickField(c, "hybridValueScore", "hybrid_value_score"),
+        0,
+      ),
+      status: coerceString(c.status, "ACTIVE") as PresetCard["status"],
+      commenceTime: coerceString(
+        pickField(c, "commenceTime", "commence_time"),
+        new Date().toISOString(),
+      ),
+    });
+  }
+  return {
+    generatedAt: coerceString(
+      pickField(obj, "generatedAt", "generated_at"),
+      new Date().toISOString(),
+    ),
+    cards,
+  };
+}
 
 export const FALLBACK_PRESET_FEED: CuratedPresetFeed = {
   generatedAt: new Date().toISOString(),
@@ -341,22 +530,32 @@ export const FALLBACK_PRESET_FEED: CuratedPresetFeed = {
 };
 
 export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPresetFeed> {
+  let redis: ReturnType<typeof createRedisClient> | null = null;
   try {
-    const redis = createRedisClient();
+    redis = createRedisClient();
     if (typeof redis.connect === "function") {
       await redis.connect();
     }
     const key = presetsFeedKey(sportKey);
-    const cached = await redis.get(key);
+    const snapshotKey = key.replace("presets:feed:", "presets:feed:snapshot:");
+    const cached = (await redis.get(key)) ?? (await redis.get(snapshotKey));
 
     if (cached) {
-      const parsed = JSON.parse(cached) as CuratedPresetFeed;
-      if (parsed && Array.isArray(parsed.cards) && parsed.cards.length > 0) {
-        return parsed;
+      const normalized = normalizeCuratedPresetFeed(JSON.parse(cached));
+      if (normalized && normalized.cards.length > 0) {
+        return normalized;
       }
     }
   } catch (err) {
     console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback preset feed.`);
+  } finally {
+    if (redis) {
+      try {
+        redis.disconnect();
+      } catch {
+        // Ignore disconnect cleanup error
+      }
+    }
   }
 
   if (sportKey && sportKey.toLowerCase().includes("nfl")) {
