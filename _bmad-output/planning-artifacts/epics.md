@@ -79,6 +79,7 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-12:** Epic 4 — 1-Tap Bet Logging
 - **FR-13:** Epic 4 — Asynchronous CLV Stamping
 - **FR-14:** Epic 5 — Automated Upstream Schedule, Prop Ingestion & Beat Orchestration
+- **FR-15:** Epic 6 — Truthful Consistency & Conviction Data
 
 ## Epic List
 
@@ -101,6 +102,10 @@ Bettors have their placed wagers seamlessly tracked upon sportsbook handoff and 
 ### Epic 5: Live Schedule & Prop Ingestion Pipeline
 Bettors and local developers see continuously updated, current NFL and NBA game slates and player prop markets without relying on static UI fallbacks, powered by an automated upstream schedule/odds poller, deterministic local seed fallback, and a 30-second Celery Beat synchronization loop that keeps the 45-second Redis hot caches warm.
 **FRs covered:** FR-14
+
+### Epic 6: Preset Data Integrity & Truthful Conviction Copy
+Bettors can trust every consistency badge, form indicator and rationale on a preset card because each is computed from real player game logs and the leg's actual side (Over/Under) and price. Cards never show fabricated defaults, and legs lacking evidence are labelled honestly or excluded.
+**FRs covered:** FR-15
 
 
 ## Epic 1: Curated Preset Parlays & Value Feed
@@ -315,3 +320,107 @@ So that all upcoming games, curated presets, and market browser slates stay cont
 **Then** the worker fetches upcoming NFL and NBA events, teams, and two-way player prop markets from the upstream provider (`PARLAY_API_BASE_URL` / `PARLAY_API_KEY`) or populates/refreshes a deterministic local slate anchored to `datetime.now(UTC)` when the upstream API is unreachable or unconfigured,
 **And** upserts `teams`, `events` (transitioning past-commence games to `COMMENCED`), and devigged `player_props` in PostgreSQL 16,
 **And** runs `sync_preset_parlay_feed` and `sync_market_browser_feed` to refresh `presets:feed:*` and `markets:browser:*` in Redis with a 45-second TTL and broadcast live odds deltas over `odds:feed:{sport_key}`.
+
+
+## Epic 6: Preset Data Integrity & Truthful Conviction Copy
+
+Triggered by a 2026-11-15 UI review: every preset leg showed an identical "7/10 (70.0%) L10", identical form dots and a templated rationale, even where the price contradicted it (e.g. Carter Runyon anytime TD at +3604). Root cause is in `services/worker/parlaypal_worker/presets.py`: a silent `Decimal("0.7000")` fallback when `hit_rate_l10` is null (line ~370), hardcoded form dots (~376), an Over-only rationale template (`generate_conviction_rationale`), and no game-log ingestion for non-seed upstream players. Stories 6.1-6.6 are ordered by dependency; 6.1 is the urgent trust fix and can ship alone.
+
+### Story 6.1: Remove Fabricated Hit-Rate Fallback & Honest Consistency Badge
+
+As a bettor,
+I want preset legs without real history to say so instead of showing a made-up 70% hit rate,
+So that I never rely on consistency data that does not exist.
+
+**Acceptance Criteria:**
+
+**Given** a candidate prop whose `hit_rate_l10` is `NULL`,
+**When** `build_preset_parlays` assembles its `PresetLeg`,
+**Then** no default (such as `0.7000`) is substituted, the hit rate and form fields are `None`, and the UI shows a neutral "Limited history" badge in place of `N/10 (X%) L10`,
+**And** such legs are excluded from the Hybrid Value Score's average hit rate (score is computed only from legs with real data) and a preset made only of legs without history is not emitted,
+**And** the rationale for such a leg makes no claim about past performance,
+**And** legs with a real `hit_rate_l10` render exactly as before.
+
+**Edge cases:** a hit rate of exactly `0` must display `0/10`, not be treated as missing (replace `or` with an explicit `is None` check); `apps/web` must tolerate null hit-rate fields from both fresh Redis feeds and the snake_case fallback normalization.
+
+### Story 6.2: Selection-Aware Hit Rate for Under Legs
+
+As a bettor,
+I want the consistency badge on an Under leg to reflect how often the player stayed under the line,
+So that the number supports the pick being shown.
+
+**Acceptance Criteria:**
+
+**Given** a prop with `selection = "UNDER"` and a line of 28.5 rush yards,
+**When** hit rates are computed (`hit_rate.py`, `update_props_hit_rates`, and the ingestion paths that set `hit_rate_l5/l10/season`),
+**Then** a game counts as a hit only when the stat is strictly below the line (Over: strictly above; a push counts as neither a hit nor a miss and is excluded from the denominator),
+**And** the rationale copy for Unders reads in the under direction (e.g. "stayed under 28.5 rush yds in 6 of last 10"), never "surpassed",
+**And** existing Over behaviour is unchanged and anytime-TD props remain Over-style.
+
+### Story 6.3: Real Recent-Form Dots From Game Logs
+
+As a bettor,
+I want the five form dots to show the player's actual last five results for that prop,
+So that I can see streaks and slumps accurately.
+
+**Acceptance Criteria:**
+
+**Given** a player with at least 5 game-log entries for the prop's market,
+**When** a preset leg is built,
+**Then** `sofascore_form` / dots reflect the last 5 outcomes, most recent last, evaluated with the same side-aware rule as Story 6.2,
+**And** the green dots never contradict the L10 label, and when fewer than 10 games exist the label shows `N/M` where `M` is the games actually available,
+**And** the hardcoded patterns `[T,T,F,T,T]` and `[T,F,T,F,T]` are deleted,
+**And** with fewer than 5 logs only the available dots render; with none, no dots render.
+
+**Dependency:** needs recent outcomes persisted or recomputable at preset-build time (store a `recent_form` array on `player_props`, or recompute from logs).
+
+### Story 6.4: Evidence-Based Conviction Rationale
+
+As a bettor,
+I want the one-line rationale to cite facts specific to the leg,
+So that cards read as distinct analysis rather than a template.
+
+**Acceptance Criteria:**
+
+**Given** a leg with a price, devigged fair probability and (when available) a hit rate,
+**When** `generate_conviction_rationale` runs,
+**Then** the sentence cites only data present on the leg: hit rate with side and line when known, and the offered price versus the devigged fair price or EV% when no hit rate exists,
+**And** it never asserts unsupported context such as "red-zone focal point", "heavy touch volume established", or "high-leverage" matchup,
+**And** a long shot (fair probability below 10%) is never described with a consistency claim that implies a high probability,
+**And** two legs with different data produce different sentences; unit tests assert no two legs in the seed slate share identical rationale text unless their inputs are identical.
+
+**Dependency:** Stories 6.1 and 6.2.
+
+### Story 6.5: Game-Log Ingestion for Upstream (Non-Seed) Players
+
+As a bettor,
+I want real hit rates for the actual players on the live slate,
+So that consistency data exists for upstream props and not only for seeded demo players.
+
+**Acceptance Criteria:**
+
+**Given** the sync loop ingests upstream props for players such as those in the 2026-11-15 screenshot,
+**When** the worker runs `sync_player_hit_rates` / `sync_live_slate`,
+**Then** the worker fetches per-player recent game logs or box scores from the configured provider (worker only, never `apps/web`), keyed by `(player_name, market_key)`, and populates `hit_rate_l5`, `hit_rate_l10` and `hit_rate_season`,
+**And** players with fewer than 5 games of history, or whose lookups fail, remain `NULL` (feeding the Story 6.1 "Limited history" path) without crashing the beat loop,
+**And** provider calls are rate-limited and cached so the 30-second cycle and 45-second TTL still hold,
+**And** the seed-slate path keeps its deterministic logs for offline development.
+
+**Open question for the build team:** confirm which `parlay-api.com` endpoint, or alternate source, exposes player game logs. If none does, this story needs a spike first and 6.1 remains the shipped mitigation.
+
+### Story 6.6: Preset Candidate Quality Gate & De-duplication
+
+As a bettor,
+I want preset cards to contain distinct, sensible legs,
+So that the feed does not repeat the same player across cards or show implausible picks.
+
+**Acceptance Criteria:**
+
+**Given** the candidate pool used by `build_preset_parlays`,
+**When** presets are assembled,
+**Then** a player appears in at most one preset per feed refresh (today Cody White and Rico Dowdle each appear twice),
+**And** legs failing a plausibility check are dropped: a market and position mismatch, or a fair probability below a configurable floor for presets labelled high-conviction,
+**And** the Outlier Circuit Breaker rule (`EV_guarded > 10%` is `SUSPECT_STALE_LINE` and never published) is unaffected,
+**And** the quality-gate thresholds are named constants with unit tests covering the boundary values.
+
+**Open question:** confirm whether Carson Beck "Under 11.5 Rush Yds" is a data/mapping error before tuning the plausibility rule.
