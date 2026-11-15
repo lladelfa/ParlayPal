@@ -2,7 +2,7 @@
 title: "ParlayPal — Product Requirements Document"
 status: final
 created: "2026-11-08"
-updated: "2026-11-08"
+updated: "2026-11-14"
 ---
 
 # PRD: ParlayPal
@@ -152,6 +152,12 @@ The system must ingest weather forecast data for all outdoor NFL stadiums within
 **Consequences (testable):**
 - If wind speed $\ge 15\text{ mph}$, a weather badge is applied to passing and kicking props for that event.
 - If precipitation probability $\ge 50\%$ (rain or snow), a wet conditions badge is attached.
+
+#### FR-14: Automated Upstream Schedule, Prop Ingestion & Beat Orchestration
+The worker service must periodically fetch upcoming NFL and NBA game schedules, team metadata, and two-way player prop markets from the configured upstream provider (`PARLAY_API_BASE_URL` / `PARLAY_API_KEY`), with a deterministic local seed fallback when running offline or without live provider credentials, persist active schedules and devigged props into PostgreSQL 16, and run a 30-second Celery Beat cycle to keep the 45-second Redis hot caches (`markets:browser:*`, `presets:feed:*`, `ev:feed:*`) continuously warm. Realizes UJ-1, UJ-2.
+**Consequences (testable):**
+- Running the worker and Celery Beat locally populates PostgreSQL (`teams`, `events`, `player_props`) with current upcoming games (`commence_time > now_utc`) and refreshes Redis feeds every 30 seconds before the 45-second TTL expires.
+- Commenced or completed games are transitioned out of active pre-match feeds automatically on each sync pass.
 
 ---
 
