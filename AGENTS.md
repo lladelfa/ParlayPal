@@ -19,15 +19,34 @@ ParlayPal is a high-conviction sports betting intelligence platform built on a p
 
 ### Feature Branching Workflow (Required by Default)
 - **Never commit directly to `main` for feature work or bug fixes.**
-- Before starting any story, bugfix, or spec work, create and switch to a dedicated feature branch from the latest `main`:
+- Before starting any story, bugfix, or spec work, create and switch to a dedicated feature branch (`feat/`, `fix/`, `chore/`, `docs/`, `refactor/`, `test/`) from the latest `main`:
   ```bash
-  git checkout main
-  git pull origin main
-  git checkout -b feat/<epic-num>-<story-num>-<short-slug>
-  # Example: feat/1-3-rolling-hit-rate-weather-engine
+  python _bmad/scripts/git_flow.py start feat/<epic-num>-<story-num>-<short-slug>
+  # Example: python _bmad/scripts/git_flow.py start feat/5-1-schedule-poller
+  ```
+- Stage, commit, and push changes from the feature branch in one step:
+  ```bash
+  python _bmad/scripts/git_flow.py ship -m "feat(scope): short summary" --files path/a path/b
+  # Or stage all working tree changes:
+  python _bmad/scripts/git_flow.py ship -m "feat(scope): short summary" --all
+  ```
+- Sync local `main` and prune stale remote branches after a PR merges:
+  ```bash
+  python _bmad/scripts/git_flow.py sync
   ```
 - All implementation changes, reviews, patches, and local commits must occur on the feature branch.
 - PRs or human merges integrate the feature branch into `main`.
+
+### Zero-Prompt Agent Execution Rule
+- Agents **must** execute Git branch creation, staging/committing, and pushing via a single, unchained command starting with `python _bmad/scripts/git_flow.py <subcommand> ...` (with `BypassSandbox: true` when Windows sandbox blocks `.git/` locks or network).
+- **Never** chain multiple `git` commands with `;` or `&&` or use shell variable expansions (`$VAR`, `$(...)`), as shell chaining disables Antigravity's prefix-based **"Always Allow"** auto-approval and re-prompts the user on every feature.
+- Use `github-mcp-server` (`create_pull_request`) to open pull requests without terminal prompts.
+
+### Zero-LLM Developer Git Aliases
+- Run `python _bmad/scripts/git_flow.py install-aliases` once to register repo-local aliases in `.git/config`:
+  - `git start-feat <branch>` → pulls `main` and creates `<branch>` (preserving dirty files via stash)
+  - `git ship -m "<msg>" [--files ... | --all]` → commits (blocking `main`/`master`) and pushes `HEAD`
+  - `git sync-main` → checks out `main`, fast-forwards from `origin/main`, and prunes remotes
 
 ---
 
