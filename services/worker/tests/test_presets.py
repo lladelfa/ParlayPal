@@ -15,6 +15,7 @@ from parlaypal_worker.hit_rate import build_recent_form_display
 from parlaypal_worker.ingestion import build_local_seed_slate, upsert_slate_to_db
 from parlaypal_worker.models import Event, PlayerProp
 from parlaypal_worker.presets import (
+    MIN_FAIR_PROBABILITY,
     CuratedPresetFeed,
     PresetCard,
     PresetError,
@@ -565,6 +566,7 @@ def _slate(
     hit_rates: list[Decimal | None],
     market_key: str = "player_points",
     outcomes: list[bool | None] | None = None,
+    sport_key: str = "nba",
 ) -> tuple[list[PlayerProp], dict[uuid.UUID, Event], datetime]:
     now_utc = datetime.now(UTC)
     props: list[PlayerProp] = []
@@ -574,7 +576,7 @@ def _slate(
         events[event_id] = Event(
             event_id=event_id,
             external_provider_id=f"papi_event_{i}",
-            sport_key="nba",
+            sport_key=sport_key,
             commence_time=now_utc + timedelta(hours=i + 2),
             status="SCHEDULED",
             home_team_id=uuid.uuid4(),
@@ -785,7 +787,7 @@ def test_under_rationale_unmapped_market_omits_unit(market_key: str) -> None:
 
 
 def test_curated_presets_forward_under_selection_to_rationale() -> None:
-    props, events, now = _slate([Decimal("0.6")] * 3, market_key="player_rush_yds")
+    props, events, now = _slate([Decimal("0.6")] * 3, market_key="player_rush_yds", sport_key="nfl")
     for prop in props:
         prop.selection = "UNDER"
         prop.line_value = Decimal("28.5")
@@ -961,7 +963,6 @@ def test_distinct_inputs_give_distinct_rationales() -> None:
         prop.line_value = Decimal("20.5") + i
         prop.offered_decimal_odds = Decimal("1.80") + Decimal(i) / 10
         prop.fair_probability = Decimal("0.50") + Decimal(i) / 100
-        prop.player_name = "Same Player"
     legs = _all_legs(generate_curated_presets(props, events, now_utc=now, target_count=5))
     texts = {leg.prop_id: leg.conviction_rationale for leg in legs}
     assert len(texts) > 1
@@ -1099,3 +1100,131 @@ def test_pass_tds_under_has_unit() -> None:
         line_value=Decimal("1.5"),
     )
     assert "stayed under 1.5 pass TDs in 6/10" in text
+
+
+def _gate_slate(
+    specs: list[tuple[str, str, str, Decimal]],
+) -> tuple[list[PlayerProp], dict[uuid.UUID, Event], datetime]:
+    """Build props from (player_name, sport_key, market_key, fair_probability) specs."""
+    now_utc = datetime.now(UTC)
+    props: list[PlayerProp] = []
+    events: dict[uuid.UUID, Event] = {}
+    for i, (name, sport, market, fair) in enumerate(specs):
+        event_id = uuid.uuid4()
+        events[event_id] = Event(
+            event_id=event_id,
+            external_provider_id=f"papi_gate_event_{i}",
+            sport_key=sport,
+            commence_time=now_utc + timedelta(hours=i + 2),
+            status="SCHEDULED",
+            home_team_id=uuid.uuid4(),
+            away_team_id=uuid.uuid4(),
+        )
+        props.append(
+            PlayerProp(
+                prop_id=uuid.uuid4(),
+                external_provider_id=f"papi_gate_prop_{i}",
+                event_id=event_id,
+                player_name=name,
+                market_key=market,
+                selection="OVER",
+                line_value=Decimal("22.5"),
+                offered_decimal_odds=Decimal("1.8500"),
+                sharp_decimal_odds=Decimal("1.8000"),
+                fair_probability=fair,
+                guarded_ev=Decimal("0.0545"),
+                status="ACTIVE",
+                hit_rate_l10=Decimal("0.7000"),
+            )
+        )
+    return props, events, now_utc
+
+
+def _prop_ids(feed: CuratedPresetFeed) -> set[uuid.UUID]:
+    return {leg.prop_id for leg in _all_legs(feed)}
+
+
+def test_min_fair_probability_constant() -> None:
+    assert Decimal("0.10") == MIN_FAIR_PROBABILITY
+
+
+def test_fair_probability_at_floor_is_kept() -> None:
+    props, events, now = _gate_slate(
+        [(f"P{i}", "nba", "player_points", MIN_FAIR_PROBABILITY) for i in range(4)]
+    )
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert _prop_ids(feed)
+
+
+def test_fair_probability_below_floor_is_dropped() -> None:
+    below = MIN_FAIR_PROBABILITY - Decimal("0.0001")
+    specs = [(f"P{i}", "nba", "player_points", Decimal("0.5500")) for i in range(4)]
+    specs.append(("Longshot", "nba", "player_points", below))
+    props, events, now = _gate_slate(specs)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert props[-1].prop_id not in _prop_ids(feed)
+    assert _prop_ids(feed)
+
+
+def test_sport_market_mismatch_is_dropped() -> None:
+    specs = [(f"P{i}", "nfl", "player_rush_yds", Decimal("0.5500")) for i in range(4)]
+    specs.append(("Mismatch", "nfl", "player_points", Decimal("0.5500")))
+    props, events, now = _gate_slate(specs)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert props[-1].prop_id not in _prop_ids(feed)
+    assert _prop_ids(feed)
+
+
+def test_nba_event_with_nfl_market_is_dropped() -> None:
+    specs = [(f"P{i}", "nba", "player_points", Decimal("0.5500")) for i in range(4)]
+    specs.append(("Mismatch", "nba", "player_anytime_td", Decimal("0.5500")))
+    props, events, now = _gate_slate(specs)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert props[-1].prop_id not in _prop_ids(feed)
+
+
+def test_player_appears_in_at_most_one_preset() -> None:
+    specs: list[tuple[str, str, str, Decimal]] = []
+    for i in range(4):
+        specs.append((f"Player {i}", "nba", "player_points", Decimal("0.5500")))
+        specs.append((f"Player {i}", "nba", "player_rebounds", Decimal("0.5400")))
+    props, events, now = _gate_slate(specs)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    names = [leg.player_name.strip().lower() for leg in _all_legs(feed)]
+    assert names
+    assert len(names) == len(set(names))
+
+
+def test_player_dedup_is_case_and_whitespace_insensitive() -> None:
+    specs = [
+        ("Cody White", "nba", "player_points", Decimal("0.5500")),
+        (" cody  white ", "nba", "player_rebounds", Decimal("0.5400")),
+        ("Rico Dowdle", "nba", "player_points", Decimal("0.5300")),
+    ]
+    props, events, now = _gate_slate(specs)
+    feed = generate_curated_presets(props, events, now_utc=now)
+    for card in feed.cards:
+        norm = [" ".join(leg.player_name.lower().split()) for leg in card.legs]
+        assert len(norm) == len(set(norm))
+    names = [" ".join(leg.player_name.lower().split()) for leg in _all_legs(feed)]
+    assert len(names) == len(set(names))
+
+
+def test_too_few_distinct_players_emits_fewer_cards() -> None:
+    props, events, now = _gate_slate(
+        [
+            ("Solo", "nba", "player_points", Decimal("0.5500")),
+            ("Solo", "nba", "player_rebounds", Decimal("0.5400")),
+            ("Solo", "nba", "player_threes", Decimal("0.5300")),
+        ]
+    )
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert feed.cards == []
+
+
+def test_outlier_breaker_still_excludes_after_gate() -> None:
+    specs = [(f"P{i}", "nba", "player_points", Decimal("0.5500")) for i in range(4)]
+    props, events, now = _gate_slate(specs)
+    props[0].guarded_ev = Decimal("0.1001")
+    feed = generate_curated_presets(props, events, now_utc=now)
+    assert props[0].prop_id not in _prop_ids(feed)

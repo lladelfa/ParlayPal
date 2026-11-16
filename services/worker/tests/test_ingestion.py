@@ -496,7 +496,7 @@ def test_missing_or_placeholder_api_key_falls_back_to_seed_without_http(
     assert result.props_outlier_blocked == 0
     assert result.market_browser_games == 6
     assert result.market_browser_props == 12
-    assert result.presets_generated == 5
+    assert result.presets_generated == 4  # one player per preset (Story 6.6)
     assert result.odds_deltas_published == 6
 
     db_props = list(session.scalars(select(PlayerProp)).all())

@@ -373,6 +373,38 @@ def _format_market_display(market_key: str, line_value: Decimal | None, selectio
     return f"{selection.capitalize()} {val_str} {market_key}"
 
 
+MIN_FAIR_PROBABILITY = Decimal("0.10")
+"""Quality-gate floor: legs with a lower devigged fair probability are never curated."""
+
+_NBA_MARKET_TOKENS = ("points", "rebounds", "assists", "threes", "steals", "blocks")
+_NFL_MARKET_TOKENS = ("td", "pass", "rush", "reception", "receiving", "rec_")
+
+
+def _market_sport(market_key: str) -> str | None:
+    """Return the sport a market key belongs to, or None when it cannot be classified."""
+    key = market_key.lower()
+    if any(token in key for token in _NFL_MARKET_TOKENS):
+        return "nfl"
+    if any(token in key for token in _NBA_MARKET_TOKENS):
+        return "nba"
+    return None
+
+
+def _is_plausible_market(market_key: str, sport: str) -> bool:
+    """A known market must fit the event's sport; unclassifiable markets are not penalised."""
+    market_sport = _market_sport(market_key)
+    return market_sport is None or market_sport == sport
+
+
+def _player_identity(player_name: str) -> str:
+    """Case- and whitespace-insensitive player identity used for de-duplication."""
+    return " ".join(player_name.lower().split())
+
+
+def _distinct_players(pairs: list[tuple[PresetLeg, datetime]]) -> set[str]:
+    return {_player_identity(p[0].player_name) for p in pairs}
+
+
 def generate_curated_presets(
     props: list[PlayerProp],
     events_map: dict[uuid.UUID, Event],
@@ -408,6 +440,8 @@ def generate_curated_presets(
             continue
         if prop.fair_probability is None or prop.offered_decimal_odds < Decimal("1.01"):
             continue
+        if prop.fair_probability < MIN_FAIR_PROBABILITY:
+            continue
 
         event = events_map.get(prop.event_id)
         if not event:
@@ -415,6 +449,9 @@ def generate_curated_presets(
         if event.status in ("LIVE", "FINAL", "CANCELLED", "POSTPONED"):
             continue
         if event.commence_time <= ref_time:
+            continue
+        event_sport = "nfl" if "nfl" in event.sport_key.lower() else "nba"
+        if not _is_plausible_market(prop.market_key, event_sport):
             continue
 
         clean_candidates.append((prop, event))
@@ -537,21 +574,39 @@ def generate_curated_presets(
     theme_idx = 0
     all_themes = nfl_themes + nba_themes
 
+    used_players: set[str] = set()
+
     for theme_title, theme_badge in all_themes:
         sport = "nfl" if "nfl" in theme_badge.lower() else "nba"
-        candidates = legs_by_sport[sport]
-        if len(candidates) < 2:
+        available_sport = [
+            p
+            for p in legs_by_sport[sport]
+            if _player_identity(p[0].player_name) not in used_players
+        ]
+        candidates = available_sport
+        if len(_distinct_players(candidates)) < 2:
             # If not enough for this specific sport, borrow from general pool if available
-            candidates = all_legs
+            candidates = [
+                p for p in all_legs if _player_identity(p[0].player_name) not in used_players
+            ]
 
-        if len(candidates) < 2:
+        if len(_distinct_players(candidates)) < 2:
             continue
 
-        # Select 2 to 3 distinct legs
-        leg_count = 2 if len(candidates) < 3 else 3
-        # Rotate selection to avoid identical cards
+        # Select 2 to 3 legs from distinct players, rotating to avoid identical cards
+        leg_count = 2 if len(_distinct_players(candidates)) < 3 else 3
         start_idx = (theme_idx * 2) % len(candidates)
-        selected_pairs = [candidates[(start_idx + i) % len(candidates)] for i in range(leg_count)]
+        rotated = candidates[start_idx:] + candidates[:start_idx]
+        selected_pairs: list[tuple[PresetLeg, datetime]] = []
+        card_players: set[str] = set()
+        for pair in rotated:
+            identity = _player_identity(pair[0].player_name)
+            if identity in card_players:
+                continue
+            card_players.add(identity)
+            selected_pairs.append(pair)
+            if len(selected_pairs) == leg_count:
+                break
 
         card_legs = [p[0] for p in selected_pairs]
         if not any(leg.hit_rate_l10 is not None for leg in card_legs):
@@ -559,6 +614,7 @@ def generate_curated_presets(
             theme_idx += 1
             continue
         earliest_time = min(p[1] for p in selected_pairs)
+        used_players |= card_players
 
         card = PresetCard.create(
             preset_id=uuid.uuid4(),
