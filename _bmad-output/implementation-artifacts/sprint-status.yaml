@@ -73,7 +73,7 @@ development_status:
   6-3-real-recent-form-dots-from-game-logs: done
   6-4-evidence-based-conviction-rationale: done
   6-5-game-log-ingestion-for-upstream-players: done
-  6-6-preset-candidate-quality-gate-dedup: backlog
+  6-6-preset-candidate-quality-gate-dedup: review
   6-7-api-sports-game-log-provider-adapter: backlog
   epic-6-retrospective: optional
 
