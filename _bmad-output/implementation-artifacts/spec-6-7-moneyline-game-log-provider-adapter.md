@@ -2,7 +2,8 @@
 title: 'Story 6.7: MoneyLine Game-Log Provider Adapter (NBA & NFL)'
 type: 'feature'
 created: '2026-11-16'
-status: 'draft'
+status: 'done'
+baseline_commit: '6d1628323aa5d0664c0d399b6efd8fc1c17321fa'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -54,12 +55,21 @@ context:
 
 ## Code Map
 
-- `services/worker/parlaypal_worker/game_logs.py` -- 6.5 `resolve_game_logs`, cache, budget, deadline, breaker; add provider selection and reuse.
-- `services/worker/parlaypal_worker/config.py` -- add `game_log_provider`, `moneyline_api_key`, `moneyline_api_base_url`, requests-per-minute limit, roster TTL, log TTL.
-- `services/worker/parlaypal_worker/ingestion.py` -- `_attach_upstream_game_logs` consumes the result unchanged.
-- New `services/worker/parlaypal_worker/moneyline.py` -- adapter: auth, roster sync, name normalization and aliases, NBA flat and NFL nested stat extraction, limiter.
-- `.env.example` -- add `MONEYLINE_API_KEY` and `MONEYLINE_API_BASE_URL` placeholders (worker `.env` already has them locally and is gitignored).
-- Tests: mirror `tests/test_game_logs.py` (`httpx.MockTransport`, `FakeRedisClient`); do not hit the network.
+- `services/worker/parlaypal_worker/game_logs.py` -- `resolve_game_logs(targets, *, settings, redis_client, http_client)` takes `(sport_key, player_name, market_key)` targets and returns `{(player_name, market_key): list[Decimal]}` with >= 5 games (`MIN_GAMES_FOR_HIT_RATE`). Its loop owns the per-cycle budget (`game_log_fetch_budget_per_cycle`), wall-clock deadline, 3-failure breaker and negative cache. Keep that loop; add a provider branch that delegates the fetch step to the MoneyLine adapter when `game_log_provider == "moneyline"`, and widen `is_game_log_source_configured` to accept it. Do not change the generic fetcher's behaviour or the `player_anytime_td` skip.
+- `services/worker/parlaypal_worker/config.py` -- `WorkerSettings` (pydantic-settings, reads `services/worker/.env`). Add `game_log_provider: str = ""`, `moneyline_api_key`, `moneyline_api_base_url="https://mlapi.bet/v1"`, `moneyline_requests_per_minute=10`, `moneyline_roster_ttl_seconds=7d`, `moneyline_log_ttl_seconds=20h`, optional `moneyline_season_nba` / `moneyline_season_nfl` overrides. Supported sports are only `basketball_nba` and `americanfootball_nfl`.
+- `services/worker/parlaypal_worker/ingestion.py:2280` -- `_attach_upstream_game_logs` builds targets from `slate.props` with a line and consumes the dict unchanged; no edit expected.
+- New `services/worker/parlaypal_worker/moneyline.py` -- adapter: auth, incremental roster sync, name normalization and aliases, NBA flat and NFL nested stat extraction, `gameType` filter, rate limiter.
+- `.env.example` -- add `MONEYLINE_API_KEY`, `MONEYLINE_API_BASE_URL` and `GAME_LOG_PROVIDER` placeholders (worker `.env` already has the first two locally and is gitignored).
+- Tests: new `tests/test_moneyline.py` mirroring `tests/test_game_logs.py` (`httpx.MockTransport`, `FakeRedisClient` imported from `tests.test_ingestion`); do not hit the network. Existing 6.5 tests must pass unchanged.
+
+## Design Notes
+
+- **Redis surface is only `get`/`set(ex=)`/`publish`** (`RedisLike`, `redis_client.py:34`); there is no `incr`. The limiter therefore keeps a per-minute counter in `ml:rl:{epoch_minute}` via get-then-set with a 70-second expiry. It is not atomic, which is acceptable for a single beat worker; document that.
+- **One MoneyLine call serves all of a player's markets.** Fetch a player's season log once, derive every market's series from it, and cache the per-player extraction by `playerId` (`ml:gamelog:{league}:{playerId}`, 20h) so a player with several prop markets costs one credit. The existing per-`(sport, player, market)` cache key and negative cache still apply on top.
+- **Roster sync cannot finish inside one 12-second, 20-credit cycle** (NFL is about 37 pages, and Free allows 10 requests a minute). Cache each roster page separately (`ml:roster:{league}:{page}`, 7 days) and fetch a few uncached pages per cycle. Until the roster is complete, targets whose name is not yet found are deferred, not negative-cached; once complete, an unfound name is negative-cached. Roster-page credits come out of the same per-cycle budget.
+- **Season string:** NBA season starts in October and NFL in September; derive `YYYY-YY` from the current UTC date (months before the start month belong to the prior-year season), overridable by config.
+- **Stat mapping** lives in `moneyline.py` as constants keyed by `(sport_key, market_key)`; an unmapped market returns no log (NULL), never a guess.
+- **Credit accounting:** one budget unit per HTTP call; read the `x-credits-remaining` header and stop the cycle early when it reaches 0.
 
 ## Tasks & Acceptance
 
@@ -104,6 +114,17 @@ context:
 - 2026-11-16 (second entry): Human approved keeping only `regular` and `postseason` game types and dropping `preseason`, after Task 1 found preseason rows in NBA logs. Added to Boundaries (game-type filter, `playerId` keying) and two matrix rows. Task 1 marked complete; the gate passed (NBA 99%, NFL 100% name match with alias fallback).
 
 ## Review Triage Log
+
+Review was an inline self-review by the implementing session, not the three context-free reviewer layers (no subagents were launched without the human's explicit say-so). A `/code-review` or `bmad-code-review` pass is still recommended before merge.
+
+| # | Finding | Verdict | Route | Evidence |
+|---|---|---|---|---|
+| 1 | Empty game logs cached only 15 minutes, so a player with no games was re-polled (1 credit) every 15 minutes although the vendor refreshes daily | medium | patch (done) | `_player_series` used the negative TTL for empty results; about 10 such players would burn roughly 29K credits a month. Now cached for the full 20h TTL; test `test_empty_log_is_not_repolled_after_the_target_negative_cache_expires`. |
+| 2 | The `.env.example` placeholder key counted as configured, causing a 401 call every cycle | low | patch (done) | `is_game_log_source_configured` only checked non-empty. Placeholder set added; test `test_example_placeholder_api_key_counts_as_not_configured`. |
+| 3 | `MONEYLINE_REQUESTS_PER_MINUTE` was undocumented, so Starter users would stay throttled at 10 | low | patch (done) | Default is the Free-tier 10; `.env.example` now documents 10 Free and 60 Starter. |
+| 4 | Cycle deadline had no MoneyLine test | low | patch (done) | Added `test_cycle_deadline_defers_everything_without_calls`. |
+| 5 | Limiter counter is get-then-set, not atomic | low | rejected | Single beat worker (spec Design Notes); `RedisLike` has no `incr`. Concurrent workers could overshoot by a call or two, and a 429 is handled as a deferral. |
+| 6 | Roster is cached page by page with the page count from the first fetch; a roster that grows mid-week is stale until pages expire | low | rejected | Pages expire after 7 days; a new player resolves to NULL (not a wrong match) until then. Fix would add invalidation complexity. |
 
 ## Verification
 
