@@ -27,6 +27,8 @@ context:
 - Game logs: `GET /players/{playerId}/stats?type=game&season=<season>` returns newest-first rows. Season string is `YYYY-YY` for NBA and NFL (e.g. `2026-27`; the bare `2026` form returned no rows for NFL). Derive the current season from the date with a config override; do not trust `/leagues` `season`, which was stale.
 - Stat mapping (league and market -> field): NBA `points` -> `stats.points`, `rebounds` -> `stats.total_rebounds`, `threes` -> `stats.threepoint_goals_made`; NFL `player_rush_yds` -> `stats.rushing.yards`, `player_pass_yds` -> `stats.passing.yards` (key unverified, see Task 1). A row missing the mapped field is skipped, not counted as 0.
 - Name matching: roster sync via `GET /players?league=<id>&limit=100&page=<n>` (about 10 credits per league), cached as a name -> `playerId` map with a 7-day TTL. Match on the normalized full name (case, accents, punctuation, hyphens, Jr/Sr/II/III suffixes) with a small alias table for nicknames; require a unique match. Ignore stale placeholder roster rows with abbreviated first names (e.g. `A. Funk`). Ambiguous or unmatched names, or under 5 games, stay NULL and are logged by count (not by player) for coverage tracking.
+- Game-type filter: keep only rows whose `gameType` is `regular` or `postseason`; drop `preseason` and any other or missing value, so preseason games never count toward hit rates or the 5-game minimum.
+- Key logs and the roster map by `playerId`, so two prop names resolving to one player (e.g. `Wendell Carter` and `Wendell Carter Jr.`) cost one fetch.
 - Positive TTL for logs is 20 hours (vendor refreshes stats daily); finished-game rows need no per-game cache because one call returns the whole season.
 - Rates still come only from `compute_rolling_hit_rate`; seed path never calls the provider.
 
@@ -42,6 +44,8 @@ context:
 | Placeholder roster row | `A. Funk` style abbreviated name | ignored by matcher |
 | Empty game log | `data: []` (e.g. fringe player) | NULL, negative-cached |
 | Field missing on a row | no `stats.rushing` on a game | row skipped, not counted as 0 |
+| Preseason rows | log mixes `regular`, `postseason`, `preseason` | preseason dropped; only regular/postseason counted toward logs and the 5-game minimum |
+| Two prop names, one player | `Wendell Carter` and `Wendell Carter Jr.` | one `playerId`, one fetch, both names get the logs |
 | Rate limit (HTTP 429) | per-minute cap or credit exhaustion | remaining targets deferred to later cycle; breaker not tripped by 429 alone |
 | Season boundary | new season has no rows yet | NULL (or prior-season fallback only if explicitly configured) |
 | Provider unset | `game_log_provider` generic/unset | 6.5 behaviour unchanged |
@@ -89,13 +93,15 @@ context:
 - **Name match (gate passed):** NFL 61/62 strict (98%), 62/62 (100%) with an initial+last-name fallback; NBA 119/123 strict (97%), 122/123 (99%) with the fallback. Strict means normalized full name with accents, punctuation and Jr/Sr suffixes handled. Non-strict cases: nicknames (`Joshua Giddey` -> `Josh Giddey`, `Alexandre Sarr` -> `Alex Sarr`, `Herb Jones` -> `Herbert Jones`, `Matthew Hibner` -> `Matt Hibner`) and one genuinely ambiguous `Cam Johnson` (2 initial+last candidates; needs an alias or team disambiguation, otherwise stays NULL). The alias table plus unique initial+last fallback is justified; ambiguous results must still stay NULL.
 - **NFL passing field confirmed:** `stats.passing.yards` (also `comp_att`, `passing_touch_downs`, `interceptions`, `sacks`, `rating`). `stats.rushing.yards` confirmed on a QB and an RB. Which groups exist depends on the player's role, so a missing group means skip the row.
 - **DNP:** no zero-minute, null-minute or missing-`points` rows in 14 NBA players' logs (minimum 11 minutes), so DNP games appear to be absent from the feed rather than present as zeros. Not proven for every player; the "missing field -> skip, never 0" rule covers the rest.
-- **New finding, preseason rows:** NBA logs mix `gameType` values (`regular` and `preseason`; `postseason` seen last season). In the sample, preseason games were 2 to 4 of 14 to 17 rows per player. **Proposed constraint (needs human approval before freezing):** the adapter keeps only `regular` and `postseason` rows and drops `preseason`, since preseason minutes and usage are not comparable and would distort hit rates and the 5-game minimum.
+- **New finding, preseason rows:** NBA logs mix `gameType` values (`regular` and `preseason`; `postseason` seen last season). In the sample, preseason games were 2 to 4 of 14 to 17 rows per player. **Approved by the human on 2026-11-16 and frozen above:** the adapter keeps only `regular` and `postseason` rows and drops `preseason`, since preseason minutes and usage are not comparable and would distort hit rates and the 5-game minimum.
 - **Duplicate-name handling:** the slate lists both `Wendell Carter` and `Wendell Carter Jr.`; both resolve to the same player ID. The adapter should key logs by `playerId` to avoid double-fetching.
 - **Roster size correction:** the NFL roster is 3,693 players (about 37 pages, 37 credits per sync), far more than expected; NBA is 747 real players (about 10 credits). With a 7-day TTL that is roughly 150 credits a month for NFL and 40 for NBA, which is fine on Starter and tolerable on Free.
 
 ## Spec Change Log
 
 - 2026-11-16: Provider renegotiated by the human from api-sports.io to MoneyLine (mlapi.bet) after a free-tier probe showed current NBA/NFL coverage, 1-credit game logs and a 99% NBA name match without needing a paid plan to verify. Frozen intent, approach, constraints and matrix rewritten for MoneyLine; the paid-plan gate and the NFL game-centric ingest (per-game statistics, 90-day game cache) were dropped because MoneyLine returns whole-season per-game logs in one call. Task 1 reduced to the three open checks. Spec file renamed from `spec-6-7-api-sports-game-log-provider-adapter.md`.
+
+- 2026-11-16 (second entry): Human approved keeping only `regular` and `postseason` game types and dropping `preseason`, after Task 1 found preseason rows in NBA logs. Added to Boundaries (game-type filter, `playerId` keying) and two matrix rows. Task 1 marked complete; the gate passed (NBA 99%, NFL 100% name match with alias fallback).
 
 ## Review Triage Log
 
