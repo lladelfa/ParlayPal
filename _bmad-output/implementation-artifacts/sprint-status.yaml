@@ -63,8 +63,8 @@ development_status:
   4-3-clv-analytics-long-term-edge-reporting: done
   epic-4-retrospective: optional
 
-  epic-5: in-progress
-  5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration: review
+  epic-5: done
+  5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration: done
   epic-5-retrospective: optional
 
   epic-6: in-progress
@@ -73,7 +73,7 @@ development_status:
   6-3-real-recent-form-dots-from-game-logs: done
   6-4-evidence-based-conviction-rationale: done
   6-5-game-log-ingestion-for-upstream-players: done
-  6-6-preset-candidate-quality-gate-dedup: review
+  6-6-preset-candidate-quality-gate-dedup: done
   6-7-api-sports-game-log-provider-adapter: backlog
   epic-6-retrospective: optional
 
