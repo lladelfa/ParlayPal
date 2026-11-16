@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from parlaypal_worker.hit_rate import normalize_selection
+from parlaypal_worker.hit_rate import build_recent_form_display, normalize_selection
 from parlaypal_worker.models import Event, PlayerProp, Team
 
 logger = logging.getLogger(__name__)
@@ -433,22 +433,9 @@ def generate_curated_presets(
         team_abbr = prop_team.abbreviation if prop_team else away_abbr
 
         # Format hit rates (a missing hit rate stays missing; never invent one)
-        l10_rate = prop.hit_rate_l10
-        hit_display: str | None = None
-        form_bools: list[bool] = []
-        dots = ""
-        if l10_rate is not None:
-            l10_pct = float(l10_rate) * 100.0
-            l10_hits = int(round(float(l10_rate) * 10))
-            hit_display = f"{l10_hits}/10 ({l10_pct:.1f}%) L10"
-
-            # Form dots (placeholder pattern until Story 6.3)
-            form_bools = (
-                [True, True, False, True, True]
-                if l10_rate >= Decimal("0.60")
-                else [True, False, True, False, True]
-            )
-            dots = "".join("🟢" if h else "🔴" for h in form_bools)
+        hit_display, form_bools, dots = build_recent_form_display(
+            prop.hit_rate_l10, prop.recent_outcomes
+        )
 
         # Weather badge
         weather_badge = None

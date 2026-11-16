@@ -2,7 +2,8 @@
 title: 'Story 6.3: Real Recent-Form Dots From Game Logs'
 type: 'feature'
 created: '2026-11-15'
-status: 'in-progress'
+status: 'done'
+baseline_commit: '418fac4543be326ab8bca30a5133dfc778cae9b9'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -89,3 +90,14 @@ context:
 - `uv run --directory services/worker mypy parlaypal_worker tests` -- expected: 0 errors
 - `uv run --directory services/worker pytest -v` -- expected: all pass
 - `npm --prefix apps/web run typecheck` and `npm --prefix apps/web test -- --run` -- expected: pass
+
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| Existing prop: rate overwritten but outcomes kept when market has none (stale outcomes vs rate/line/selection) | medium | patch | `devig.py:724` only writes outcomes when supplied; rates always written. |
+| Upsert computes outcomes only when a rate is missing; provider-supplied rates leave outcomes NULL/stale | medium | patch | `ingestion.py:2057-2070`. |
+| No test of existing-prop update, provider-rates-with-logs, or backfill selection (Under) | medium | patch | Removing the update branch leaves all tests green. |
+| `test_green_dots_never_exceed_l10_hits` asserts `sum(form) <= 5` | low | patch | Trivially true. |
+| Postgres `ALTER TABLE ... IF NOT EXISTS` path untested; SQLite upgrade path absent | medium | defer | Needs a Postgres fixture; production is Postgres, `create_all` covers fresh/test DBs. |
+| Outcomes list unbounded/coerced on `TwoWayPropMarketInput` | low | rejected | Producers are internal; read path slices to 10. |
+| Fewer than 5 dots when pushes fall in last 5; all-push window | low | rejected | Spec decision (pushes skipped); all-push yields no decided rate. |
+| Backfill fills outcomes beside provider-supplied rate; backfill never refreshes; `[]` persisted; JSON null; unused imports | low/false | rejected | `update_props_hit_rates` refreshes both; ruff clean; Python reads None for JSON null. |

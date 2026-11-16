@@ -503,6 +503,7 @@ class TwoWayPropMarketInput(BaseModel):
         le=Decimal("1"),
         allow_inf_nan=False,
     )
+    recent_outcomes: list[bool | None] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -720,6 +721,10 @@ def process_and_publish_ev_props(
                         existing_prop.hit_rate_l10 = evaluation.hit_rate_l10
                     if market.hit_rate_season is not None:
                         existing_prop.hit_rate_season = market.hit_rate_season
+                    # Outcomes move together with the rates/line/selection they describe.
+                    existing_prop.recent_outcomes = (
+                        list(market.recent_outcomes) if market.recent_outcomes is not None else None
+                    )
                     session.flush()
                 else:
                     new_prop = PlayerProp(
@@ -738,6 +743,11 @@ def process_and_publish_ev_props(
                         hit_rate_l5=market.hit_rate_l5,
                         hit_rate_l10=evaluation.hit_rate_l10,
                         hit_rate_season=market.hit_rate_season,
+                        recent_outcomes=(
+                            list(market.recent_outcomes)
+                            if market.recent_outcomes is not None
+                            else None
+                        ),
                         status=evaluation.status,
                     )
                     session.add(new_prop)

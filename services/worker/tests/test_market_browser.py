@@ -92,7 +92,10 @@ def _prop(
     status: str = "ACTIVE",
     offered: Decimal = Decimal("1.9000"),
     fair: Decimal | None = Decimal("0.5400"),
+    recent_outcomes: list[bool | None] | None = None,
 ) -> PlayerProp:
+    if recent_outcomes is None and hit_rate_l10 is not None:
+        recent_outcomes = [True, True, False, True, False, True, True, False, True, True]
     return PlayerProp(
         prop_id=uuid.uuid4(),
         external_provider_id=f"papi_prop_{uuid.uuid4().hex[:8]}",
@@ -109,6 +112,7 @@ def _prop(
         hit_rate_l5=Decimal("0.8000"),
         hit_rate_l10=hit_rate_l10,
         hit_rate_season=Decimal("0.6800"),
+        recent_outcomes=recent_outcomes,
         status=status,
     )
 
@@ -413,7 +417,8 @@ def test_prop_rows_carry_full_telemetry(slate: dict[str, Any]) -> None:
     assert tatum.offered_american_odds == -111
     assert tatum.hit_rate_l5 == Decimal("0.8000")
     assert tatum.hit_rate_season == Decimal("0.6800")
-    assert len(tatum.sofascore_form) == 5
+    assert tatum.hit_rate_display == "7/10 (70.0%) L10"
+    assert tatum.sofascore_form == [False, True, False, True, True]
     assert len(tatum.sofascore_dots) == 5
     assert tatum.weather_badge is not None
     assert tatum.weather_badge.badge_type == "DOME"
@@ -656,3 +661,20 @@ def test_celery_sync_market_browser_feed_task(slate: dict[str, Any]) -> None:
     assert "Outlier Guy" not in cached
     assert "Live Player" not in cached
     assert session.closed is False  # caller-owned session is not closed
+
+
+def test_market_row_rate_only_is_percent_only_label(slate: dict[str, Any]) -> None:
+    prop = slate["named"]["tatum_pts"]
+    prop.recent_outcomes = None
+    item = {p.prop_id: p for p in _build(slate).props}[prop.prop_id]
+    assert item.hit_rate_display == "80.0% L10"
+    assert item.sofascore_form == []
+    assert item.sofascore_dots == ""
+
+
+def test_market_row_pushes_and_short_history(slate: dict[str, Any]) -> None:
+    prop = slate["named"]["tatum_pts"]
+    prop.recent_outcomes = [True, None, False]
+    item = {p.prop_id: p for p in _build(slate).props}[prop.prop_id]
+    assert item.hit_rate_display == "1/2 (50.0%) L10"
+    assert item.sofascore_form == [False, True]

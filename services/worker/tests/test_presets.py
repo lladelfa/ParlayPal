@@ -449,6 +449,7 @@ def test_generate_curated_presets_feed_structure() -> None:
             hit_rate_l5=Decimal("0.8000"),
             hit_rate_l10=Decimal("0.8000"),
             hit_rate_season=Decimal("0.7500"),
+            recent_outcomes=[True, True, False, True, True, True, False, True, True, True],
         )
         props.append(prop)
 
@@ -556,7 +557,9 @@ def _make_leg(hit_rate_l10: Decimal | None, name: str = "P") -> PresetLeg:
 
 
 def _slate(
-    hit_rates: list[Decimal | None], market_key: str = "player_points"
+    hit_rates: list[Decimal | None],
+    market_key: str = "player_points",
+    outcomes: list[bool | None] | None = None,
 ) -> tuple[list[PlayerProp], dict[uuid.UUID, Event], datetime]:
     now_utc = datetime.now(UTC)
     props: list[PlayerProp] = []
@@ -587,6 +590,7 @@ def _slate(
                 guarded_ev=Decimal("0.0545"),
                 status="ACTIVE",
                 hit_rate_l10=rate,
+                recent_outcomes=list(outcomes) if outcomes is not None else None,
             )
         )
     return props, events, now_utc
@@ -596,16 +600,72 @@ def _all_legs(feed: CuratedPresetFeed) -> list[PresetLeg]:
     return [leg for card in feed.cards for leg in card.legs]
 
 
-def test_real_hit_rate_display_and_dots_unchanged() -> None:
-    props, events, now = _slate([Decimal("0.7")] * 3)
-    feed = generate_curated_presets(props, events, now_utc=now)
-    legs = _all_legs(feed)
+SEVEN_OF_TEN: list[bool | None] = [True, True, False, True, True, False, True, False, True, True]
+
+
+def test_real_outcomes_drive_label_and_dots() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3, outcomes=SEVEN_OF_TEN)
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now))
     assert legs
     for leg in legs:
         assert leg.hit_rate_display == "7/10 (70.0%) L10"
+        # last 5 (most recent first) = T,T,F,T,T -> most recent last
         assert leg.sofascore_form == [True, True, False, True, True]
-        assert leg.sofascore_dots == "🟢🟢🔴🟢🟢"
+        assert leg.sofascore_dots == "\U0001f7e2\U0001f7e2\U0001f534\U0001f7e2\U0001f7e2"
         assert "7/10 (70.0%) L10" in leg.conviction_rationale
+
+
+def test_dots_follow_actual_order_not_a_fixed_pattern() -> None:
+    outcomes: list[bool | None] = [False, False, False, True, True, True, True, True, True, True]
+    props, events, now = _slate([Decimal("0.7")] * 3, outcomes=outcomes)
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.sofascore_form == [True, True, False, False, False]
+
+
+def test_fewer_than_ten_outcomes_label() -> None:
+    outcomes: list[bool | None] = [True, False, True, False, True, True]
+    props, events, now = _slate([Decimal("0.6667")] * 3, outcomes=outcomes)
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.hit_rate_display == "4/6 (66.7%) L10"
+        assert len(leg.sofascore_form) == 5
+
+
+def test_fewer_than_five_outcomes_dots() -> None:
+    props, events, now = _slate([Decimal("0.6667")] * 3, outcomes=[True, False, True])
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.hit_rate_display == "2/3 (66.7%) L10"
+        assert leg.sofascore_form == [True, False, True]
+        assert len(leg.sofascore_dots) == 3
+
+
+def test_pushes_excluded_from_label_and_skipped_in_dots() -> None:
+    outcomes: list[bool | None] = [True, None, True, False, None, True, True, False, False, True]
+    props, events, now = _slate([Decimal("0.625")] * 3, outcomes=outcomes)
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.hit_rate_display == "5/8 (62.5%) L10"
+        # last 5 = T,None,T,F,None -> pushes skipped, most recent last
+        assert leg.sofascore_form == [False, True, True]
+
+
+def test_rate_without_outcomes_is_percent_only() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3)
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.hit_rate_display == "70.0% L10"
+        assert leg.sofascore_form == []
+        assert leg.sofascore_dots == ""
+        assert "/10" not in leg.conviction_rationale
+
+
+def test_green_dots_never_exceed_l10_hits() -> None:
+    # Most recent first: last 5 = T,T,F,F,T (3 green); older 5 = T,T,T,F,F -> 6/10 hits overall.
+    outcomes: list[bool | None] = [True, False, False, True, True, True, True, True, False, False]
+    props, events, now = _slate([Decimal("0.6")] * 3, outcomes=outcomes)
+    for leg in _all_legs(generate_curated_presets(props, events, now_utc=now)):
+        assert leg.hit_rate_display == "6/10 (60.0%) L10"
+        l10_hits = int(leg.hit_rate_display.split("/")[0])
+        assert sum(leg.sofascore_form) == 3
+        assert sum(leg.sofascore_form) <= l10_hits
+        assert leg.sofascore_form == [True, True, False, False, True]
 
 
 def test_missing_hit_rate_leg_is_honest() -> None:
@@ -622,12 +682,13 @@ def test_missing_hit_rate_leg_is_honest() -> None:
 
 
 def test_zero_hit_rate_is_real() -> None:
-    props, events, now = _slate([Decimal("0"), Decimal("0"), Decimal("0")])
+    props, events, now = _slate([Decimal("0"), Decimal("0"), Decimal("0")], outcomes=[False] * 10)
     feed = generate_curated_presets(props, events, now_utc=now)
     legs = _all_legs(feed)
     assert legs
     for leg in legs:
         assert leg.hit_rate_display == "0/10 (0.0%) L10"
+        assert leg.sofascore_form == [False] * 5
         assert leg.hit_rate_l10 == Decimal("0")
 
 

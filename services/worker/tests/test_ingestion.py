@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -2220,3 +2220,232 @@ def test_non_canonical_markets_sub_101_alternates_and_retail_one_way_props_skipp
         )
     assert invalid_malformed == 1
     assert any("Decimal price out of bounds: 0.85" in rec.message for rec in caplog.records)
+
+
+def test_upsert_persists_recent_outcomes_and_backfill_fills_null(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    """Outcomes are written at ingestion (Under side-aware) and by the NULL backfill."""
+    session, _, _ = db_session
+    fixed_now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    teams = [
+        IngestedTeam(
+            external_provider_id=f"papi_nba_team_{abbr.lower()}",
+            sport_key="basketball_nba",
+            name=name,
+            abbreviation=abbr,
+            is_dome=True,
+        )
+        for abbr, name in (("BOS", "Boston Celtics"), ("NYK", "New York Knicks"))
+    ]
+    evt = IngestedEvent(
+        external_provider_id="papi_nba_evt_outcomes",
+        sport_key="basketball_nba",
+        home_team_external_id="papi_nba_team_nyk",
+        away_team_external_id="papi_nba_team_bos",
+        commence_time=fixed_now + timedelta(hours=3),
+        is_dome=True,
+    )
+    prop = IngestedProp(
+        external_provider_id="papi_prop_outcomes_under",
+        event_external_id="papi_nba_evt_outcomes",
+        sport_key="basketball_nba",
+        team_external_id="papi_nba_team_bos",
+        player_name="Jayson Tatum",
+        market_key="player_points",
+        selection="UNDER",
+        line_value=Decimal("26.5"),
+        offered_decimal_odds=Decimal("2.0200"),
+        sharp_decimal_odds=Decimal("1.9000"),
+        opposite_sharp_decimal_odds=Decimal("1.9200"),
+    )
+    logs = [
+        IngestedGameLog(
+            player_name="Jayson Tatum",
+            market_key="player_points",
+            stats=[Decimal(v) for v in (30, 20, 26, 40)],
+        )
+    ]
+    slate = IngestedSlate(
+        source="upstream",
+        generated_at=fixed_now,
+        teams=teams,
+        events=[evt],
+        props=[prop],
+        game_logs=logs,
+    )
+    upsert_slate_to_db(session, slate, now_utc=fixed_now, redis_client=None)
+    row = session.scalar(select(PlayerProp))
+    assert row is not None
+    assert row.recent_outcomes == [False, True, True, False]
+
+    # Backfill: a prop with NULL rates/outcomes not in this slate gets them filled from logs.
+    row.recent_outcomes = None
+    row.hit_rate_l5 = row.hit_rate_l10 = row.hit_rate_season = None
+    session.commit()
+    backfill_slate = IngestedSlate(
+        source="upstream",
+        generated_at=fixed_now,
+        teams=teams,
+        events=[],
+        props=[],
+        game_logs=logs,
+    )
+    upsert_slate_to_db(session, backfill_slate, now_utc=fixed_now, redis_client=None)
+    session.refresh(row)
+    assert row.recent_outcomes == [False, True, True, False]
+    assert row.hit_rate_l10 is not None
+
+
+def _outcomes_slate(
+    fixed_now: datetime,
+    stats: list[int] | None,
+    *,
+    selection: Literal["OVER", "UNDER"] = "OVER",
+    rates: Decimal | None = None,
+    with_prop: bool = True,
+) -> IngestedSlate:
+    teams = [
+        IngestedTeam(
+            external_provider_id=f"papi_nba_team_{abbr.lower()}",
+            sport_key="basketball_nba",
+            name=name,
+            abbreviation=abbr,
+            is_dome=True,
+        )
+        for abbr, name in (("BOS", "Boston Celtics"), ("NYK", "New York Knicks"))
+    ]
+    evt = IngestedEvent(
+        external_provider_id="papi_nba_evt_two_pass",
+        sport_key="basketball_nba",
+        home_team_external_id="papi_nba_team_nyk",
+        away_team_external_id="papi_nba_team_bos",
+        commence_time=fixed_now + timedelta(hours=3),
+        is_dome=True,
+    )
+    prop = IngestedProp(
+        external_provider_id="papi_prop_two_pass",
+        event_external_id="papi_nba_evt_two_pass",
+        sport_key="basketball_nba",
+        team_external_id="papi_nba_team_bos",
+        player_name="Jayson Tatum",
+        market_key="player_points",
+        selection=selection,
+        line_value=Decimal("26.5"),
+        offered_decimal_odds=Decimal("2.0200"),
+        sharp_decimal_odds=Decimal("1.9000"),
+        opposite_sharp_decimal_odds=Decimal("1.9200"),
+        hit_rate_l5=rates,
+        hit_rate_l10=rates,
+        hit_rate_season=rates,
+    )
+    logs = (
+        [
+            IngestedGameLog(
+                player_name="Jayson Tatum",
+                market_key="player_points",
+                stats=[Decimal(v) for v in stats],
+            )
+        ]
+        if stats is not None
+        else []
+    )
+    return IngestedSlate(
+        source="upstream",
+        generated_at=fixed_now,
+        teams=teams,
+        events=[evt] if with_prop else [],
+        props=[prop] if with_prop else [],
+        game_logs=logs,
+    )
+
+
+def test_recent_outcomes_two_pass_update_and_clear(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    session, _, _ = db_session
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+
+    upsert_slate_to_db(session, _outcomes_slate(now, [30, 20]), now_utc=now, redis_client=None)
+    row = session.scalar(select(PlayerProp))
+    assert row is not None
+    assert row.recent_outcomes == [True, False]
+
+    upsert_slate_to_db(session, _outcomes_slate(now, [10, 40, 50]), now_utc=now, redis_client=None)
+    session.refresh(row)
+    assert row.recent_outcomes == [False, True, True]
+
+    # No game logs this pass: outcomes must not linger beside the new rate/line.
+    upsert_slate_to_db(session, _outcomes_slate(now, None), now_utc=now, redis_client=None)
+    session.refresh(row)
+    assert row.recent_outcomes is None
+
+
+def test_recent_outcomes_stored_when_provider_supplies_all_rates(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    session, _, _ = db_session
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    slate = _outcomes_slate(now, [30, 20, 40], rates=Decimal("0.8000"))
+    upsert_slate_to_db(session, slate, now_utc=now, redis_client=None)
+    row = session.scalar(select(PlayerProp))
+    assert row is not None
+    assert row.hit_rate_l10 == Decimal("0.8000")  # provider rate not overwritten
+    assert row.recent_outcomes == [True, False, True]
+
+
+@pytest.mark.parametrize("selection", ["UNDER", "under "])
+def test_backfill_outcomes_use_under_rule(
+    db_session: tuple[Session, Any, Any], selection: str
+) -> None:
+    session, _, _ = db_session
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    upsert_slate_to_db(session, _outcomes_slate(now, None), now_utc=now, redis_client=None)
+    row = session.scalar(select(PlayerProp))
+    assert row is not None
+    row.selection = selection
+    row.recent_outcomes = None
+    row.hit_rate_l5 = row.hit_rate_l10 = row.hit_rate_season = None
+    session.commit()
+
+    # Line 26.5: 30 over (miss for Under), 20 under (hit), 40 over (miss)
+    backfill = _outcomes_slate(now, [30, 20, 40], with_prop=False)
+    upsert_slate_to_db(session, backfill, now_utc=now, redis_client=None)
+    session.refresh(row)
+    assert row.recent_outcomes == [False, True, False]
+
+
+def _with_malformed_logs(slate: IngestedSlate) -> IngestedSlate:
+    bad = IngestedGameLog.model_construct(
+        player_name="Jayson Tatum", market_key="player_points", stats=[Decimal("NaN")]
+    )
+    return slate.model_copy(update={"game_logs": [bad]})
+
+
+def test_malformed_logs_with_all_provider_rates_still_ingests(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    session, _, _ = db_session
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    slate = _with_malformed_logs(_outcomes_slate(now, [30], rates=Decimal("0.8000")))
+    res = upsert_slate_to_db(session, slate, now_utc=now, redis_client=None)
+    assert res.props_evaluated == 1
+    assert res.props_skipped_malformed == 0
+    row = session.scalar(select(PlayerProp))
+    assert row is not None
+    assert row.hit_rate_l5 == Decimal("0.8000")
+    assert row.hit_rate_l10 == Decimal("0.8000")
+    assert row.hit_rate_season == Decimal("0.8000")
+    assert row.recent_outcomes is None
+
+
+def test_malformed_logs_with_missing_rate_skips_prop(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    session, _, _ = db_session
+    now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    slate = _with_malformed_logs(_outcomes_slate(now, [30]))
+    res = upsert_slate_to_db(session, slate, now_utc=now, redis_client=None)
+    assert res.props_evaluated == 0
+    assert res.props_skipped_malformed == 1
+    assert session.scalar(select(PlayerProp)) is None

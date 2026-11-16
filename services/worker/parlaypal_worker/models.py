@@ -228,6 +228,10 @@ class PlayerProp(Base):
         Numeric(5, 4),
         nullable=True,
     )
+    recent_outcomes: Mapped[list[bool | None] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
