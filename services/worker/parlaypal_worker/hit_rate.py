@@ -80,6 +80,7 @@ class PropHitRateResult(BaseModel):
     l5_pushes: int = 0
     l10_pushes: int = 0
     season_pushes: int = 0
+    recent_outcomes: list[bool | None] = Field(default_factory=list)
 
 
 def normalize_selection(selection: str | None) -> str:
@@ -98,6 +99,31 @@ def format_hit_rate_string(hits: int, total: int, rate: Decimal | None) -> str:
 def generate_sofascore_form_dots(form_sequence: Sequence[bool]) -> str:
     """Render 5-dot Sofascore rolling form string (e.g., 🔴🟢🔴🟢🟢)."""
     return "".join("🟢" if hit else "🔴" for hit in form_sequence)
+
+
+def build_recent_form_display(
+    l10_rate: Decimal | None,
+    recent_outcomes: Sequence[bool | None] | None,
+) -> tuple[str | None, list[bool], str]:
+    """Build (L10 label, last-5 form booleans, dots) from stored outcomes (most recent first).
+
+    - Outcomes present: label is `{hits}/{decided} ({pct:.1f}%) L10`; dots are the last 5
+      outcomes (most recent last) with pushes skipped.
+    - Rate only (no stored outcomes): percent-only label and no dots.
+    - Neither: (None, [], "").
+    """
+    window = list(recent_outcomes[:10]) if recent_outcomes else []
+    decided = [o for o in window if o is not None]
+    if decided:
+        hits = sum(1 for o in decided if o)
+        pct = Decimal(hits) * Decimal("100") / Decimal(len(decided))
+        pct = pct.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        form = [o for o in reversed(window[:5]) if o is not None]
+        return f"{hits}/{len(decided)} ({pct}%) L10", form, generate_sofascore_form_dots(form)
+    if l10_rate is not None:
+        pct = (l10_rate * Decimal("100")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        return f"{pct}% L10", [], ""
+    return None, [], ""
 
 
 def _to_decimal_stat(val: Any, idx: int) -> Decimal:
@@ -207,6 +233,7 @@ def compute_rolling_hit_rate(
         season_formatted=format_hit_rate_string(season_hits, season_total, season_rate),
         form_dots=form_dots,
         form_sequence=chronological_l5,
+        recent_outcomes=outcomes[:10],
     )
 
 
@@ -263,6 +290,7 @@ def update_props_hit_rates(
             prop.hit_rate_l5 = hit_res.l5_rate
             prop.hit_rate_l10 = hit_res.l10_rate
             prop.hit_rate_season = hit_res.season_rate
+            prop.recent_outcomes = list(hit_res.recent_outcomes)
             prop.updated_at = now_utc
             updated_count += 1
 

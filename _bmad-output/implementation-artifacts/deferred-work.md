@@ -54,3 +54,7 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-2-selection-aware-hit-rate-for-under-legs.md`
   summary: Classify anytime-TD by exact market (not `"td"` substring) so pass-TD Unders get under-direction copy.
   evidence: `generate_conviction_rationale` uses `"td" in market_key`, so `player_pass_tds` UNDER gets "has scored a touchdown" copy.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-real-recent-form-dots-from-game-logs.md`
+  summary: Add a Postgres-backed (or mocked-connection) test for the `ALTER TABLE player_props ADD COLUMN IF NOT EXISTS recent_outcomes` upgrade in `init_db`.
+  evidence: Tests run on SQLite where the ALTER is skipped; breaking the Postgres branch would fail every PlayerProp query on existing databases without any test noticing.

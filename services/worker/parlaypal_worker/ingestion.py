@@ -2054,21 +2054,27 @@ def upsert_slate_to_db(
             hit_l5 = prop_in.hit_rate_l5
             hit_l10 = prop_in.hit_rate_l10
             hit_season = prop_in.hit_rate_season
-            if (
-                (hit_l5 is None or hit_l10 is None or hit_season is None)
-                and prop_in.line_value is not None
-                and game_logs_map
-            ):
+            recent_outcomes: list[bool | None] | None = None
+            if prop_in.line_value is not None and game_logs_map:
                 logs = game_logs_map.get((prop_in.player_name, prop_in.market_key))
                 if logs:
-                    hit_res = compute_rolling_hit_rate(
-                        game_stats=logs,
-                        line_value=prop_in.line_value,
-                        selection=prop_in.selection,
-                    )
-                    hit_l5 = hit_l5 if hit_l5 is not None else hit_res.l5_rate
-                    hit_l10 = hit_l10 if hit_l10 is not None else hit_res.l10_rate
-                    hit_season = hit_season if hit_season is not None else hit_res.season_rate
+                    rates_needed = hit_l5 is None or hit_l10 is None or hit_season is None
+                    try:
+                        hit_res = compute_rolling_hit_rate(
+                            game_stats=logs,
+                            line_value=prop_in.line_value,
+                            selection=prop_in.selection,
+                        )
+                    except (ValueError, TypeError, InvalidOperation):
+                        # Bad logs only skip the prop when a rate must be computed from them;
+                        # provider-supplied rates keep the prop valid without outcomes.
+                        if rates_needed:
+                            raise
+                    else:
+                        recent_outcomes = list(hit_res.recent_outcomes)
+                        hit_l5 = hit_l5 if hit_l5 is not None else hit_res.l5_rate
+                        hit_l10 = hit_l10 if hit_l10 is not None else hit_res.l10_rate
+                        hit_season = hit_season if hit_season is not None else hit_res.season_rate
 
             # Validate sharp/offered odds and Brent root convergence per prop so one bad record never aborts the batch
             evaluate_two_way_prop(
@@ -2091,6 +2097,7 @@ def upsert_slate_to_db(
                 hit_rate_l5=hit_l5,
                 hit_rate_l10=hit_l10,
                 hit_rate_season=hit_season,
+                recent_outcomes=recent_outcomes,
             )
         except (DeviggingError, ValidationError, ValueError, TypeError, InvalidOperation) as exc:
             skipped_malformed += 1
@@ -2175,6 +2182,7 @@ def upsert_slate_to_db(
                     db_prop.hit_rate_l5 is not None
                     and db_prop.hit_rate_l10 is not None
                     and db_prop.hit_rate_season is not None
+                    and db_prop.recent_outcomes is not None
                 ):
                     continue
                 logs = game_logs_map.get((db_prop.player_name, db_prop.market_key))
@@ -2202,6 +2210,8 @@ def upsert_slate_to_db(
                     db_prop.hit_rate_l10 = hit_res.l10_rate
                 if db_prop.hit_rate_season is None:
                     db_prop.hit_rate_season = hit_res.season_rate
+                if db_prop.recent_outcomes is None:
+                    db_prop.recent_outcomes = list(hit_res.recent_outcomes)
                 db_prop.updated_at = ref_now
                 rates_updated += 1
             if rates_updated > 0:

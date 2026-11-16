@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -80,6 +80,11 @@ def init_db(engine: Engine | None = None, database_url: str | None = None) -> En
         target_engine = engine or create_db_engine(database_url)
         with target_engine.begin() as connection:
             Base.metadata.create_all(bind=connection, checkfirst=True)
+            if connection.dialect.name == "postgresql":
+                # Idempotent upgrade for databases created before recent_outcomes existed.
+                connection.execute(
+                    text("ALTER TABLE player_props ADD COLUMN IF NOT EXISTS recent_outcomes JSON")
+                )
         return target_engine
     except (SQLAlchemyError, OSError, ImportError) as exc:
         if engine is None and target_engine is not None:

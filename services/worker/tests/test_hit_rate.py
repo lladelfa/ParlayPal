@@ -11,6 +11,7 @@ from parlaypal_worker.db import create_session_factory, init_db
 from parlaypal_worker.hit_rate import (
     HitRateError,
     PlayerGameStat,
+    build_recent_form_display,
     compute_rolling_hit_rate,
     normalize_selection,
     update_props_hit_rates,
@@ -414,6 +415,8 @@ def test_update_props_hit_rates_normalizes_lowercase_selection() -> None:
         row = session.scalar(select(PlayerProp).where(PlayerProp.prop_id == prop_id))
         assert row is not None
         assert row.hit_rate_l5 == Decimal("0.7500")
+        # most recent first; 25 is a push (None); Under hits when stat < 25
+        assert row.recent_outcomes == [True, True, None, False, True]
 
 
 def test_push_in_l5_does_not_pull_in_older_game() -> None:
@@ -427,3 +430,33 @@ def test_push_in_l5_does_not_pull_in_older_game() -> None:
 
 def test_normalize_selection_none_is_empty_string() -> None:
     assert normalize_selection(None) == ""
+
+
+def test_recent_outcomes_over_most_recent_first_with_push() -> None:
+    result = compute_rolling_hit_rate([30, 25, 20, 26], Decimal("25"), "OVER")
+    assert result.recent_outcomes == [True, None, False, True]
+
+
+def test_recent_outcomes_under_side_aware() -> None:
+    result = compute_rolling_hit_rate([30, 25, 20], Decimal("25"), "UNDER")
+    assert result.recent_outcomes == [False, None, True]
+
+
+def test_recent_outcomes_capped_at_ten() -> None:
+    result = compute_rolling_hit_rate(list(range(15)), Decimal("100"), "UNDER")
+    assert len(result.recent_outcomes) == 10
+    assert result.total_games == 15
+
+
+def test_recent_outcomes_empty_without_games() -> None:
+    assert compute_rolling_hit_rate([], Decimal("25")).recent_outcomes == []
+
+
+def test_build_form_display_matrix() -> None:
+    assert build_recent_form_display(None, None) == (None, [], "")
+    assert build_recent_form_display(Decimal("0.7"), None) == ("70.0% L10", [], "")
+    assert build_recent_form_display(Decimal("0.7"), [])[0] == "70.0% L10"
+    label, form, dots = build_recent_form_display(None, [False] * 10)
+    assert label == "0/10 (0.0%) L10"
+    assert form == [False] * 5
+    assert len(dots) == 5

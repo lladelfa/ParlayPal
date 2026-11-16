@@ -31,7 +31,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 
 generated: 11-08-2026 23:05
-last_updated: 11-15-2026 22:00
+last_updated: 11-16-2026 09:00
 project: ParlayPal
 project_key: NOKEY
 tracking_system: file-system
@@ -70,7 +70,7 @@ development_status:
   epic-6: in-progress
   6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge: review
   6-2-selection-aware-hit-rate-for-under-legs: review
-  6-3-real-recent-form-dots-from-game-logs: backlog
+  6-3-real-recent-form-dots-from-game-logs: review
   6-4-evidence-based-conviction-rationale: backlog
   6-5-game-log-ingestion-for-upstream-players: backlog
   6-6-preset-candidate-quality-gate-dedup: backlog
