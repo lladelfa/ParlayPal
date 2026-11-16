@@ -188,7 +188,7 @@ function PresetLegRow({ leg }: { leg: PresetLeg }) {
           ))}
         </div>
         <span className="font-telemetry text-[11px] font-medium text-text-muted">
-          {leg.hitRateDisplay}
+          {leg.hitRateDisplay ?? "Limited history"}
         </span>
       </div>
     </div>

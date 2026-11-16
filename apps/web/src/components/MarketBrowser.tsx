@@ -387,7 +387,7 @@ function MarketPropRowItem({
               ))}
             </div>
             <span className="font-telemetry text-xs font-medium text-text-muted">
-              {prop.hitRateDisplay}
+              {prop.hitRateDisplay ?? "Limited history"}
             </span>
 
             {/* Weather / Dome Badge */}

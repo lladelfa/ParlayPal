@@ -190,7 +190,7 @@ function CandidateRow({
               </div>
             )}
             <span className="font-telemetry text-xs font-medium text-text-muted">
-              {candidate.hitRateDisplay}
+              {candidate.hitRateDisplay ?? "Limited history"}
             </span>
 
             {/* Weather / Dome Badge */}

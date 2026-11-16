@@ -680,11 +680,9 @@ function DrawerLegRow({
               ))}
             </div>
           )}
-          {leg.hitRateDisplay && (
-            <span className="font-telemetry font-medium">
-              {leg.hitRateDisplay}
-            </span>
-          )}
+          <span className="font-telemetry font-medium">
+            {leg.hitRateDisplay ?? "Limited history"}
+          </span>
           {/* Weather Context Badge */}
           {leg.weatherBadge && (
             <span

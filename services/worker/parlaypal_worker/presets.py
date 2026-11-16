@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -10,6 +11,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from parlaypal_worker.models import Event, PlayerProp, Team
+
+logger = logging.getLogger(__name__)
 
 
 class PresetError(ValueError):
@@ -39,7 +42,7 @@ def decimal_to_american(decimal_odds: Decimal) -> int:
 
 
 def calculate_hybrid_value_score(
-    avg_hit_rate_l10: Decimal,
+    avg_hit_rate_l10: Decimal | None,
     combined_ev: Decimal,
 ) -> int:
     """Calculate composite Hybrid Value Score (0–100 index) blending consistency and guarded EV.
@@ -48,28 +51,63 @@ def calculate_hybrid_value_score(
         Score = clamp(0, 100, round(0.60 * HitRatePct + 0.40 * clamp(0, 100, (EV% * 10 + 50))))
 
     Args:
-        avg_hit_rate_l10: Average L10 hit rate across legs (0.0 to 1.0).
+        avg_hit_rate_l10: Average L10 hit rate across legs (0.0 to 1.0), or None when no leg
+            has real history (the score then uses the EV component only).
         combined_ev: Guarded expected value decimal (e.g. 0.042 for +4.2%).
 
     Returns:
         Integer score between 0 and 100.
     """
-    hit_pct = float(avg_hit_rate_l10) * 100.0
     ev_pct = float(combined_ev) * 100.0
 
     # EV component normalized: 0% EV -> 50, +5% EV -> 100, -5% EV -> 0
     ev_component = max(0.0, min(100.0, ev_pct * 10.0 + 50.0))
 
-    composite = 0.60 * hit_pct + 0.40 * ev_component
+    if avg_hit_rate_l10 is None:
+        composite = ev_component
+    else:
+        hit_pct = float(avg_hit_rate_l10) * 100.0
+        composite = 0.60 * hit_pct + 0.40 * ev_component
     clamped_score = max(0, min(100, int(round(composite))))
     return clamped_score
+
+
+def _generate_history_free_rationale(
+    player_name: str,
+    market_key: str,
+    matchup: str,
+    weather_badge_summary: str | None,
+) -> str:
+    """Rationale for legs without recent-form data: no past-performance claims."""
+    key = market_key.lower()
+    if "td" in key:
+        subject = "anytime touchdown price"
+    elif "pass" in key:
+        subject = "passing line"
+    elif "rush" in key:
+        subject = "rushing line"
+    elif "points" in key:
+        subject = "scoring line"
+    elif "rebounds" in key:
+        subject = "rebounding line"
+    elif "threes" in key:
+        subject = "perimeter-shooting line"
+    else:
+        subject = "line"
+    text = (
+        f"{player_name}: limited recent-form history, so the {subject} "
+        f"is judged on price and matchup in {matchup}"
+    )
+    if weather_badge_summary and "wind" in weather_badge_summary.lower():
+        text += f" ({weather_badge_summary})"
+    return text + "."
 
 
 def generate_conviction_rationale(
     player_name: str,
     market_key: str,
     matchup: str,
-    hit_rate_formatted: str,
+    hit_rate_formatted: str | None,
     weather_badge_summary: str | None = None,
 ) -> str:
     """Generate concise 1-sentence plain-English conviction rationale.
@@ -78,12 +116,17 @@ def generate_conviction_rationale(
         player_name: Player name (e.g. 'Derrick Henry').
         market_key: Prop market key (e.g. 'player_anytime_td', 'player_points').
         matchup: Game matchup (e.g. 'BAL @ PIT').
-        hit_rate_formatted: Formatted hit rate string (e.g. '7/10 (70.0%)').
+        hit_rate_formatted: Formatted hit rate string (e.g. '7/10 (70.0%)'). When None, the
+            rationale makes no claim about past performance.
         weather_badge_summary: Optional weather context summary (e.g. '⚠️ 19mph Wind').
 
     Returns:
         1-sentence plain-English conviction statement.
     """
+    if hit_rate_formatted is None:
+        return _generate_history_free_rationale(
+            player_name, market_key, matchup, weather_badge_summary
+        )
     if "td" in market_key.lower():
         if weather_badge_summary and "wind" in weather_badge_summary.lower():
             return (
@@ -152,9 +195,9 @@ class PresetLeg(BaseModel):
     hit_rate_l5: Decimal | None = None
     hit_rate_l10: Decimal | None = None
     hit_rate_season: Decimal | None = None
-    hit_rate_display: str
+    hit_rate_display: str | None = None
     sofascore_form: list[bool] = Field(default_factory=list)
-    sofascore_dots: str = "⚪⚪⚪⚪⚪"
+    sofascore_dots: str = ""
     weather_badge: dict[str, Any] | None = None
     conviction_rationale: str
 
@@ -241,9 +284,9 @@ class PresetCard(BaseModel):
 
         math_result = calculate_combined_parlay(legs)
 
-        # Compute average L10 hit rate across legs
+        # Average L10 hit rate across legs with real history only (None when no leg has any)
         l10_rates = [float(leg.hit_rate_l10) for leg in legs if leg.hit_rate_l10 is not None]
-        avg_l10 = Decimal(str(sum(l10_rates) / len(l10_rates))) if l10_rates else Decimal("0.6500")
+        avg_l10 = Decimal(str(sum(l10_rates) / len(l10_rates))) if l10_rates else None
 
         hybrid_score = calculate_hybrid_value_score(
             avg_hit_rate_l10=avg_l10,
@@ -344,7 +387,7 @@ def generate_curated_presets(
     clean_candidates.sort(
         key=lambda item: (
             item[0].guarded_ev or Decimal("0.0"),
-            item[0].hit_rate_l10 or Decimal("0.0"),
+            item[0].hit_rate_l10 if item[0].hit_rate_l10 is not None else Decimal("-1"),
         ),
         reverse=True,
     )
@@ -366,19 +409,23 @@ def generate_curated_presets(
         prop_team = teams.get(prop.team_id) if prop.team_id else None
         team_abbr = prop_team.abbreviation if prop_team else away_abbr
 
-        # Format hit rates
-        l10_rate = prop.hit_rate_l10 or Decimal("0.7000")
-        l10_pct = float(l10_rate) * 100.0
-        l10_hits = int(round(float(l10_rate) * 10))
-        hit_display = f"{l10_hits}/10 ({l10_pct:.1f}%) L10"
+        # Format hit rates (a missing hit rate stays missing; never invent one)
+        l10_rate = prop.hit_rate_l10
+        hit_display: str | None = None
+        form_bools: list[bool] = []
+        dots = ""
+        if l10_rate is not None:
+            l10_pct = float(l10_rate) * 100.0
+            l10_hits = int(round(float(l10_rate) * 10))
+            hit_display = f"{l10_hits}/10 ({l10_pct:.1f}%) L10"
 
-        # Form dots (default solid recent form)
-        form_bools = (
-            [True, True, False, True, True]
-            if l10_rate >= Decimal("0.60")
-            else [True, False, True, False, True]
-        )
-        dots = "".join("🟢" if h else "🔴" for h in form_bools)
+            # Form dots (placeholder pattern until Story 6.3)
+            form_bools = (
+                [True, True, False, True, True]
+                if l10_rate >= Decimal("0.60")
+                else [True, False, True, False, True]
+            )
+            dots = "".join("🟢" if h else "🔴" for h in form_bools)
 
         # Weather badge
         weather_badge = None
@@ -479,6 +526,10 @@ def generate_curated_presets(
         selected_pairs = [candidates[(start_idx + i) % len(candidates)] for i in range(leg_count)]
 
         card_legs = [p[0] for p in selected_pairs]
+        if not any(leg.hit_rate_l10 is not None for leg in card_legs):
+            logger.info("Skipping preset %r: no leg has real hit-rate history", theme_title)
+            theme_idx += 1
+            continue
         earliest_time = min(p[1] for p in selected_pairs)
 
         card = PresetCard.create(

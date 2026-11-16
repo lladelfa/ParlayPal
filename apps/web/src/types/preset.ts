@@ -23,7 +23,7 @@ export interface PresetLeg {
   hitRateL5?: string | null;
   hitRateL10?: string | null;
   hitRateSeason?: string | null;
-  hitRateDisplay: string;
+  hitRateDisplay: string | null;
   sofascoreForm: boolean[];
   sofascoreDots: string;
   weatherBadge?: WeatherBadge | null;

@@ -5,7 +5,7 @@ import type {
   SgpCorrelationAuditItem,
 } from "@/types/parlay";
 import type { PresetLeg } from "@/types/preset";
-import { decimalToAmerican } from "./math";
+import { computeHybridValueScore, decimalToAmerican } from "./math";
 
 export const MIN_PARLAY_LEGS = 2;
 export const MAX_PARLAY_LEGS = 8;
@@ -277,18 +277,7 @@ export function calculateParlaySlip(
   const combinedAmericanOdds = decimalToAmerican(Math.max(1.01, combinedDecimal));
 
   // Compute composite Hybrid Value Score
-  const hitRates = legs
-    .map((l) => (l.hitRateL10 ? parseFloat(l.hitRateL10) : 0.70))
-    .filter((n) => !isNaN(n));
-  const avgHitRate =
-    hitRates.length > 0 ? hitRates.reduce((a, b) => a + b, 0) / hitRates.length : 0.70;
-  const hitPct = avgHitRate * 100.0;
-  const evPct = combinedEv * 100.0;
-  const evComponent = Math.max(0.0, Math.min(100.0, evPct * 10.0 + 50.0));
-  const hybridValueScore = Math.max(
-    0,
-    Math.min(100, Math.round(0.60 * hitPct + 0.40 * evComponent)),
-  );
+  const hybridValueScore = computeHybridValueScore(legs, combinedEv);
 
   return {
     legs,

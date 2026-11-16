@@ -729,3 +729,30 @@ describe("parlay library - SGP correlation boost & hybrid valuation (Story 2.3)"
     expect(slip.sgpCorrelationAudit?.[0].correlationCoefficient).toBe(0.40);
     expect(slip.sgpCorrelationAudit?.[0].synergyType).toBe("positive");
   });
+
+describe("hybrid score without hit-rate history", () => {
+  it("uses the EV component only when no leg has a hitRateL10", () => {
+    const legs = [
+      createMockLeg({
+        propId: "a",
+        eventId: "ea",
+        hitRateL10: null,
+        fairProbability: "0.5000",
+        offeredDecimalOdds: "1.9091",
+      }),
+      createMockLeg({
+        propId: "b",
+        eventId: "eb",
+        hitRateL10: null,
+        fairProbability: "0.5000",
+        offeredDecimalOdds: "1.9091",
+      }),
+    ];
+    const slip = calculateParlaySlip(legs);
+    const ev = parseFloat(slip.combinedEv);
+    const expected = Math.max(0, Math.min(100, Math.round(ev * 1000 + 50)));
+    expect(slip.hybridValueScore).toBe(expected);
+    // would be 42 under the old fabricated 0.70 default
+    expect(slip.hybridValueScore).not.toBe(Math.round(0.6 * 70 + 0.4 * expected));
+  });
+});

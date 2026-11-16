@@ -160,9 +160,9 @@ class MarketBrowserPropItem(BaseModel):
     hit_rate_l5: Decimal | None = Field(default=None, alias="hitRateL5")
     hit_rate_l10: Decimal | None = Field(default=None, alias="hitRateL10")
     hit_rate_season: Decimal | None = Field(default=None, alias="hitRateSeason")
-    hit_rate_display: str = Field(..., alias="hitRateDisplay")
+    hit_rate_display: str | None = Field(default=None, alias="hitRateDisplay")
     sofascore_form: list[bool] = Field(default_factory=list, alias="sofascoreForm")
-    sofascore_dots: str = Field("⚪⚪⚪⚪⚪", alias="sofascoreDots")
+    sofascore_dots: str = Field("", alias="sofascoreDots")
     weather_badge: WeatherBadgeSummary | None = Field(default=None, alias="weatherBadge")
     hybrid_value_score: int = Field(..., alias="hybridValueScore")
     status: Literal["ACTIVE"] = "ACTIVE"
@@ -302,17 +302,20 @@ def build_market_browser_feed(
         team_abbr = prop_team.abbreviation if prop_team else away_abbr
 
         # Hit rate formatting
-        l10_rate = prop.hit_rate_l10 or Decimal("0.7000")
-        l10_pct = float(l10_rate) * 100.0
-        l10_hits = int(round(float(l10_rate) * 10))
-        hit_display = f"{l10_hits}/10 ({l10_pct:.1f}%) L10"
-
-        form_bools = (
-            [True, True, False, True, True]
-            if l10_rate >= Decimal("0.60")
-            else [True, False, True, False, True]
-        )
-        dots = "".join("🟢" if h else "🔴" for h in form_bools)
+        l10_rate = prop.hit_rate_l10
+        hit_display: str | None = None
+        form_bools: list[bool] = []
+        dots = ""
+        if l10_rate is not None:
+            l10_pct = float(l10_rate) * 100.0
+            l10_hits = int(round(float(l10_rate) * 10))
+            hit_display = f"{l10_hits}/10 ({l10_pct:.1f}%) L10"
+            form_bools = (
+                [True, True, False, True, True]
+                if l10_rate >= Decimal("0.60")
+                else [True, False, True, False, True]
+            )
+            dots = "".join("🟢" if h else "🔴" for h in form_bools)
 
         # Weather badge
         weather_badge = None
@@ -351,7 +354,9 @@ def build_market_browser_feed(
 
         # High value tiering
         is_high_val = (
-            prop.guarded_ev >= HIGH_VALUE_MIN_EV_THRESHOLD and l10_rate >= HIGH_VALUE_MIN_HIT_RATE
+            prop.guarded_ev >= HIGH_VALUE_MIN_EV_THRESHOLD
+            and l10_rate is not None
+            and l10_rate >= HIGH_VALUE_MIN_HIT_RATE
         )
         tier: Literal["STANDARD", "POSITIVE_VALUE", "HIGH_VALUE"]
         if is_high_val:
@@ -406,7 +411,7 @@ def build_market_browser_feed(
         key=lambda x: (
             x.hybrid_value_score,
             x.guarded_ev,
-            x.hit_rate_l10 or Decimal("0"),
+            x.hit_rate_l10 if x.hit_rate_l10 is not None else Decimal("-1"),
         ),
         reverse=True,
     )
