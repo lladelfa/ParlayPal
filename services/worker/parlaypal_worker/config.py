@@ -41,6 +41,16 @@ class WorkerSettings(BaseSettings):
     game_log_cycle_deadline_seconds: float = 12.0
     game_log_positive_ttl_seconds: int = 6 * 60 * 60
     game_log_negative_ttl_seconds: int = 15 * 60
+    # MoneyLine provider (Story 6.7). Selected with game_log_provider="moneyline"; the generic
+    # fetcher stays the default when it is empty. The key is read from the environment only.
+    game_log_provider: str = ""
+    moneyline_api_key: str = ""
+    moneyline_api_base_url: str = "https://mlapi.bet/v1"
+    moneyline_requests_per_minute: int = 10  # Free tier; Starter is 60
+    moneyline_roster_ttl_seconds: int = 7 * 24 * 60 * 60
+    moneyline_log_ttl_seconds: int = 20 * 60 * 60  # vendor refreshes stats daily
+    moneyline_season_nba: str = ""  # "" = derive from today's date, e.g. "2026-27"
+    moneyline_season_nfl: str = ""
     supported_sports: tuple[str, ...] = SUPPORTED_SPORT_KEYS
 
 

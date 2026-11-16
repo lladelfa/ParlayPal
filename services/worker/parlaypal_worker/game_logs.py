@@ -13,6 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from parlaypal_worker.config import WorkerSettings
+from parlaypal_worker.moneyline import MoneyLineClient, MoneyLineDeferred
 from parlaypal_worker.redis_client import RedisLike
 
 logger = logging.getLogger(__name__)
@@ -28,8 +29,22 @@ def game_log_cache_key(sport_key: str, player_name: str, market_key: str) -> str
     return f"gamelog:{sport_key}:{player_name}:{market_key}"
 
 
+MONEYLINE_PROVIDER = "moneyline"
+MONEYLINE_PLACEHOLDER_KEYS: frozenset[str] = frozenset({"", "replace_with_moneyline_api_key"})
+
+
+def _uses_moneyline(settings: WorkerSettings) -> bool:
+    return settings.game_log_provider.strip().lower() == MONEYLINE_PROVIDER
+
+
 def is_game_log_source_configured(settings: WorkerSettings) -> bool:
-    """Return True only when both the base URL and path template are configured."""
+    """Return True when the selected provider is usable.
+
+    MoneyLine needs only its API key; the generic fetcher (default) needs both the base URL and
+    the path template.
+    """
+    if _uses_moneyline(settings):
+        return settings.moneyline_api_key.strip() not in MONEYLINE_PLACEHOLDER_KEYS
     return bool(settings.game_log_base_url.strip() and settings.game_log_path_template.strip())
 
 
@@ -156,6 +171,8 @@ def resolve_game_logs(
     owns_client = http_client is None
     client: httpx.Client | None = http_client
     seen: set[tuple[str, str, str]] = set()
+    use_moneyline = _uses_moneyline(settings)
+    moneyline: MoneyLineClient | None = None
     try:
         for sport_key, player_name, market_key in targets:
             target = (sport_key, player_name, market_key)
@@ -169,21 +186,42 @@ def resolve_game_logs(
                     result[(player_name, market_key)] = cached
                 continue
             remaining = deadline - (time.monotonic() - started)
-            if budget <= 0 or remaining <= 0 or consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            # MoneyLine counts its own HTTP calls (roster pages and logs) against the same budget.
+            out_of_budget = budget <= 0 and not use_moneyline
+            if out_of_budget or remaining <= 0 or consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 deferred += 1
                 continue
-            budget -= 1
+            if not use_moneyline:
+                budget -= 1
             if client is None:
                 client = httpx.Client(timeout=DEFAULT_GAME_LOG_TIMEOUT_SECONDS)
             try:
-                stats = fetch_player_game_log(
-                    sport_key=sport_key,
-                    player_name=player_name,
-                    market_key=market_key,
-                    settings=settings,
-                    http_client=client,
-                    timeout=min(DEFAULT_GAME_LOG_TIMEOUT_SECONDS, remaining),
-                )
+                if use_moneyline:
+                    if moneyline is None:
+                        moneyline = MoneyLineClient(
+                            settings,
+                            redis_client,
+                            client,
+                            deadline_monotonic=started + deadline,
+                        )
+                    stats = moneyline.fetch(
+                        sport_key,
+                        player_name,
+                        market_key,
+                        timeout=min(DEFAULT_GAME_LOG_TIMEOUT_SECONDS, remaining),
+                    )
+                else:
+                    stats = fetch_player_game_log(
+                        sport_key=sport_key,
+                        player_name=player_name,
+                        market_key=market_key,
+                        settings=settings,
+                        http_client=client,
+                        timeout=min(DEFAULT_GAME_LOG_TIMEOUT_SECONDS, remaining),
+                    )
+            except MoneyLineDeferred:
+                deferred += 1  # postponed, not failed: no negative cache, breaker untouched
+                continue
             except Exception as exc:  # noqa: BLE001 - never raise into the beat loop
                 logger.warning("Game-log lookup failed for %s/%s: %s", player_name, market_key, exc)
                 _write_cache(redis_client, key, None, settings.game_log_negative_ttl_seconds)
@@ -200,6 +238,8 @@ def resolve_game_logs(
     finally:
         if owns_client and client is not None:
             client.close()
+    if moneyline is not None:
+        logger.info("MoneyLine game-log cycle: %s", moneyline.summary())
     logger.info(
         "Game-log cycle: %d fetched, %d failed, %d deferred (budget/deadline/breaker), %d resolved",
         fetched,
