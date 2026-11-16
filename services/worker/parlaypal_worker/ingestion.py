@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from sqlalchemy import Engine, inspect, select
 from sqlalchemy.orm import Session
 
-from parlaypal_worker.config import get_settings
+from parlaypal_worker.config import WorkerSettings, get_settings
 from parlaypal_worker.db import create_session_factory, init_db
 from parlaypal_worker.devig import (
     DeviggingError,
@@ -27,6 +27,7 @@ from parlaypal_worker.devig import (
     evaluate_two_way_prop,
     process_and_publish_ev_props,
 )
+from parlaypal_worker.game_logs import resolve_game_logs
 from parlaypal_worker.hit_rate import compute_rolling_hit_rate, normalize_selection
 from parlaypal_worker.market_browser import (
     CANONICAL_MARKETS_BY_SPORT,
@@ -2276,6 +2277,37 @@ def _publish_live_odds_deltas(
     return published_count
 
 
+def _attach_upstream_game_logs(
+    slate: IngestedSlate,
+    *,
+    settings: WorkerSettings,
+    redis_client: RedisLike,
+    http_client: httpx.Client | None = None,
+) -> IngestedSlate:
+    """Add cached/budgeted provider game logs for upstream props; never raises."""
+    try:
+        targets = [
+            (prop.sport_key, prop.player_name, prop.market_key)
+            for prop in slate.props
+            if prop.line_value is not None
+        ]
+        fetched = resolve_game_logs(
+            targets, settings=settings, redis_client=redis_client, http_client=http_client
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Game-log resolution failed; leaving hit rates NULL: %s", exc)
+        return slate
+    if not fetched:
+        return slate
+    existing = {(g.player_name, g.market_key) for g in slate.game_logs}
+    new_logs = [
+        IngestedGameLog(player_name=player, market_key=market, stats=stats)
+        for (player, market), stats in fetched.items()
+        if (player, market) not in existing
+    ]
+    return slate.model_copy(update={"game_logs": [*slate.game_logs, *new_logs]})
+
+
 def run_live_slate_sync(
     *,
     session: Session | None = None,
@@ -2286,6 +2318,7 @@ def run_live_slate_sync(
     now_utc: datetime | None = None,
     ttl_seconds: int = HOT_CACHE_TTL_SECONDS,
     ensure_schema: bool = True,
+    game_log_http_client: httpx.Client | None = None,
 ) -> SlateSyncResult:
     """Execute end-to-end schedule/prop ingestion, devigging, DB upsert, feed sync, and delta broadcast."""
     settings = get_settings()
@@ -2336,6 +2369,13 @@ def run_live_slate_sync(
                         len(slate.props),
                     )
                     slate = build_local_seed_slate(now_utc=ref_now)
+                else:
+                    slate = _attach_upstream_game_logs(
+                        slate,
+                        settings=settings,
+                        redis_client=active_redis,
+                        http_client=game_log_http_client,
+                    )
 
         upsert_summary = upsert_slate_to_db(
             active_session,
