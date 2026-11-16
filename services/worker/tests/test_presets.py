@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -115,6 +116,46 @@ def test_conviction_micro_copy_generation() -> None:
     )
     assert "Jayson Tatum" in copy_nba
     assert "8/10" in copy_nba or "80.0%" in copy_nba
+
+
+def test_under_rationale_reads_under_direction() -> None:
+    text = generate_conviction_rationale(
+        player_name="Derrick Henry",
+        market_key="player_rush_yds",
+        matchup="BAL @ PIT",
+        hit_rate_formatted="6/10 (60.0%) L10",
+        selection="UNDER",
+        line_value=Decimal("28.5"),
+    )
+    assert "stayed under 28.5" in text
+    assert "6/10 (60.0%) L10" in text
+    for word in ("surpassed", "cleared", "has scored"):
+        assert word not in text
+
+
+def test_under_td_rationale_stays_over_style() -> None:
+    kwargs: dict[str, Any] = {
+        "player_name": "Derrick Henry",
+        "market_key": "player_anytime_td",
+        "matchup": "BAL @ PIT",
+        "hit_rate_formatted": "7/10 (70.0%)",
+    }
+    assert generate_conviction_rationale(
+        **kwargs, selection="UNDER", line_value=Decimal("0.5")
+    ) == generate_conviction_rationale(**kwargs)
+
+
+def test_over_rationale_defaults_identical() -> None:
+    kwargs: dict[str, Any] = {
+        "player_name": "Derrick Henry",
+        "market_key": "player_rush_yds",
+        "matchup": "BAL @ PIT",
+        "hit_rate_formatted": "7/10 (70.0%)",
+    }
+    assert generate_conviction_rationale(
+        **kwargs, selection="OVER", line_value=Decimal("80.5")
+    ) == generate_conviction_rationale(**kwargs)
+    assert "surpassed rushing line" in generate_conviction_rationale(**kwargs)
 
 
 def test_calculate_combined_parlay() -> None:
@@ -660,3 +701,31 @@ def test_score_without_any_hit_rate_is_ev_only() -> None:
     assert calculate_hybrid_value_score(None, Decimal("0.0")) == 50
     assert calculate_hybrid_value_score(None, Decimal("0.5")) == 100
     assert calculate_hybrid_value_score(None, Decimal("-0.5")) == 0
+
+
+@pytest.mark.parametrize("market_key", ["player_receptions", "player_pass_attempts"])
+def test_under_rationale_unmapped_market_omits_unit(market_key: str) -> None:
+    text = generate_conviction_rationale(
+        player_name="X",
+        market_key=market_key,
+        matchup="A @ B",
+        hit_rate_formatted="6/10 (60.0%) L10",
+        selection="UNDER",
+        line_value=Decimal("4.5"),
+    )
+    assert "stayed under 4.5 in 6/10" in text
+    assert "player_" not in text
+    assert "pass yds" not in text
+
+
+def test_curated_presets_forward_under_selection_to_rationale() -> None:
+    props, events, now = _slate([Decimal("0.6")] * 3, market_key="player_rush_yds")
+    for prop in props:
+        prop.selection = "UNDER"
+        prop.line_value = Decimal("28.5")
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now))
+    assert legs
+    for leg in legs:
+        assert "stayed under 28.5" in leg.conviction_rationale
+        assert "surpassed" not in leg.conviction_rationale
+        assert "cleared" not in leg.conviction_rationale

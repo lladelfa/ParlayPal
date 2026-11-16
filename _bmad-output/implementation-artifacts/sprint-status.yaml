@@ -69,7 +69,7 @@ development_status:
 
   epic-6: in-progress
   6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge: review
-  6-2-selection-aware-hit-rate-for-under-legs: in-progress
+  6-2-selection-aware-hit-rate-for-under-legs: review
   6-3-real-recent-form-dots-from-game-logs: backlog
   6-4-evidence-based-conviction-rationale: backlog
   6-5-game-log-ingestion-for-upstream-players: backlog

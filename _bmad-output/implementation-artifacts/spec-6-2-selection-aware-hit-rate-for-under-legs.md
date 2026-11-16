@@ -2,7 +2,8 @@
 title: 'Story 6.2: Selection-Aware Hit Rate for Under Legs'
 type: 'bugfix'
 created: '2026-11-15'
-status: 'in-progress'
+status: 'done'
+baseline_commit: 'c46e3973e5d2d0536fae026e2efd405db40578f3'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -90,3 +91,17 @@ context:
 - `uv run --directory services/worker mypy parlaypal_worker tests` -- expected: 0 errors
 - `uv run --directory services/worker pytest -v` -- expected: all pass
 - `npm --prefix apps/web run typecheck` and `npm --prefix apps/web test -- --run` -- expected: pass (no web changes expected)
+
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| `_under_unit` substring match mislabels markets and leaks raw `market_key` into copy | medium | patch | `player_pass_attempts` -> "pass yds"; `player_receptions` -> raw key. |
+| No test that `generate_curated_presets` forwards selection/line_value | medium | patch | Dropping the kwargs leaves all tests green. |
+| No persistence-level lowercase/padded selection test; push-in-L5 non-backfill unproven | low | patch | Helper is unit-tested only. |
+| N/10 display derived from rate over push-shrunk denominator | low | defer | Explicit frozen-spec decision; fix needs stored counts (new surface). |
+| Stored rates from old push-as-miss logic not recomputed (backfill fills only None columns) | medium | defer | Existing rows keep stale rates until re-ingested. |
+| `td` substring classifies pass-TD Unders as Over-style copy | low | defer | Pre-existing classification; evidence-based copy is Story 6.4. |
+| Tiny non-push sample (e.g. 1/1 = 100%) has no minimum-sample guard | low | rejected | Requires 4 of 5 pushes; policy choice not in intent. |
+| Form dots shorter/empty with pushes; push counts not persisted | low | rejected | Spec decisions; Story 6.3 replaces dots. |
+| Under TD uses Over-style copy | false | rejected | Epic AC: anytime-TD stays Over-style. |
+| `season_total` semantics change breaks consumers | false | rejected | No consumers outside hit_rate.py and tests. |
+| Weather dropped in Under copy, whole-number line renders "25.0", unknown selection -> OVER, non-str selection, all-push "0/0" | low/false | rejected | Spec silent/negligible, pre-existing, or rate None hides the badge. |

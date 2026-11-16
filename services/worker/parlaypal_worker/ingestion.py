@@ -27,7 +27,7 @@ from parlaypal_worker.devig import (
     evaluate_two_way_prop,
     process_and_publish_ev_props,
 )
-from parlaypal_worker.hit_rate import compute_rolling_hit_rate
+from parlaypal_worker.hit_rate import compute_rolling_hit_rate, normalize_selection
 from parlaypal_worker.market_browser import (
     CANONICAL_MARKETS_BY_SPORT,
     build_market_browser_feed,
@@ -2182,7 +2182,7 @@ def upsert_slate_to_db(
                     continue
                 try:
                     sel_str: Literal["OVER", "UNDER"] = (
-                        "UNDER" if db_prop.selection == "UNDER" else "OVER"
+                        "UNDER" if normalize_selection(db_prop.selection) == "UNDER" else "OVER"
                     )
                     hit_res = compute_rolling_hit_rate(
                         game_stats=logs,

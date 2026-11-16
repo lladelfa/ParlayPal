@@ -77,6 +77,14 @@ class PropHitRateResult(BaseModel):
     season_formatted: str = ""
     form_dots: str = ""
     form_sequence: list[bool] = Field(default_factory=list)
+    l5_pushes: int = 0
+    l10_pushes: int = 0
+    season_pushes: int = 0
+
+
+def normalize_selection(selection: str | None) -> str:
+    """Normalize a bet side string (strip + upper-case); None becomes empty string."""
+    return (selection or "").strip().upper()
 
 
 def format_hit_rate_string(hits: int, total: int, rate: Decimal | None) -> str:
@@ -122,10 +130,12 @@ def compute_rolling_hit_rate(
     - `game_stats`: list of statistical values ordered from MOST RECENT to OLDEST.
     - `line_value`: prop threshold.
     - `selection`: "OVER" (hits when stat > line) or "UNDER" (hits when stat < line).
-      Pushes (stat == line) are not counted as hits.
+      Pushes (stat == line) are excluded from both numerator and denominator of their window.
     """
-    if selection not in ("OVER", "UNDER"):
+    normalized = normalize_selection(selection) if isinstance(selection, str) else ""
+    if normalized not in ("OVER", "UNDER"):
         raise HitRateError(f"selection must be 'OVER' or 'UNDER' (got {selection!r}).")
+    selection = "UNDER" if normalized == "UNDER" else "OVER"
 
     if isinstance(line_value, bool) or line_value is None:
         raise HitRateError("line_value cannot be boolean or None.")
@@ -152,49 +162,30 @@ def compute_rolling_hit_rate(
 
     parsed_stats = [_to_decimal_stat(val, i) for i, val in enumerate(game_stats)]
 
-    # Compute hit for each game:
-    # OVER: stat > target_line
-    # UNDER: stat < target_line
-    # Equal: push -> False
-    hits_list: list[bool] = [
-        (stat > target_line) if selection == "OVER" else (stat < target_line)
+    # Tri-state outcome per game: True = hit, False = miss, None = push (stat == line).
+    outcomes: list[bool | None] = [
+        None if stat == target_line else ((stat > target_line) == (selection == "OVER"))
         for stat in parsed_stats
     ]
 
-    # L5 sample: first 5 games (most recent)
-    l5_slice = hits_list[:5]
-    l5_total = len(l5_slice)
-    l5_hits = sum(1 for h in l5_slice if h)
-    l5_rate = (
-        (Decimal(l5_hits) / Decimal(l5_total)).quantize(HIT_RATE_QUANTIZE, rounding=ROUND_HALF_UP)
-        if l5_total > 0
-        else None
-    )
-
-    # L10 sample: first 10 games (most recent)
-    l10_slice = hits_list[:10]
-    l10_total = len(l10_slice)
-    l10_hits = sum(1 for h in l10_slice if h)
-    l10_rate = (
-        (Decimal(l10_hits) / Decimal(l10_total)).quantize(HIT_RATE_QUANTIZE, rounding=ROUND_HALF_UP)
-        if l10_total > 0
-        else None
-    )
-
-    # Season sample: all games in current series
-    season_hits = sum(1 for h in hits_list if h)
-    season_total = total_games
-    season_rate = (
-        (Decimal(season_hits) / Decimal(season_total)).quantize(
-            HIT_RATE_QUANTIZE, rounding=ROUND_HALF_UP
+    def _window(window: Sequence[bool | None]) -> tuple[int, int, int, Decimal | None]:
+        decided = [o for o in window if o is not None]
+        hits = sum(1 for o in decided if o)
+        total = len(decided)
+        rate = (
+            (Decimal(hits) / Decimal(total)).quantize(HIT_RATE_QUANTIZE, rounding=ROUND_HALF_UP)
+            if total > 0
+            else None
         )
-        if season_total > 0
-        else None
-    )
+        return hits, total, len(window) - total, rate
 
-    # Form dots: Sofascore represents form chronologically (oldest to newest) of the last 5 games
-    # l5_slice is ordered [most_recent, ..., oldest], so reversed(l5_slice) is [oldest -> most_recent]
-    chronological_l5 = list(reversed(l5_slice))
+    l5_slice = outcomes[:5]
+    l5_hits, l5_total, l5_pushes, l5_rate = _window(l5_slice)
+    l10_hits, l10_total, l10_pushes, l10_rate = _window(outcomes[:10])
+    season_hits, season_total, season_pushes, season_rate = _window(outcomes)
+
+    # Form dots: chronological (oldest to newest) last-5 window; pushes are skipped.
+    chronological_l5 = [o for o in reversed(l5_slice) if o is not None]
     form_dots = generate_sofascore_form_dots(chronological_l5)
 
     return PropHitRateResult(
@@ -202,12 +193,15 @@ def compute_rolling_hit_rate(
         l5_hits=l5_hits,
         l5_total=l5_total,
         l5_rate=l5_rate,
+        l5_pushes=l5_pushes,
         l10_hits=l10_hits,
         l10_total=l10_total,
         l10_rate=l10_rate,
+        l10_pushes=l10_pushes,
         season_hits=season_hits,
         season_total=season_total,
         season_rate=season_rate,
+        season_pushes=season_pushes,
         l5_formatted=format_hit_rate_string(l5_hits, l5_total, l5_rate),
         l10_formatted=format_hit_rate_string(l10_hits, l10_total, l10_rate),
         season_formatted=format_hit_rate_string(season_hits, season_total, season_rate),
@@ -258,7 +252,7 @@ def update_props_hit_rates(
                 continue
 
             selection_str: Literal["OVER", "UNDER"] = (
-                "UNDER" if prop.selection == "UNDER" else "OVER"
+                "UNDER" if normalize_selection(prop.selection) == "UNDER" else "OVER"
             )
             hit_res = compute_rolling_hit_rate(
                 game_stats=logs,

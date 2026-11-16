@@ -12,6 +12,7 @@ from parlaypal_worker.hit_rate import (
     HitRateError,
     PlayerGameStat,
     compute_rolling_hit_rate,
+    normalize_selection,
     update_props_hit_rates,
 )
 from parlaypal_worker.models import Event, PlayerProp, Team
@@ -78,7 +79,7 @@ def test_under_prop_with_push_handling() -> None:
     # 25 == 25 (Push - not a hit)
     # 28 > 25 (Miss)
     # 22 < 25 (Hit)
-    # Hits: 3 / 5 = 0.6000
+    # Push excluded: 3 hits / 4 non-push games = 0.7500
     game_stats = [24, 20, 25, 28, 22]
     result = compute_rolling_hit_rate(
         game_stats=game_stats,
@@ -88,9 +89,58 @@ def test_under_prop_with_push_handling() -> None:
 
     assert result.total_games == 5
     assert result.l5_hits == 3
-    assert result.l5_total == 5
+    assert result.l5_total == 4
+    assert result.l5_pushes == 1
+    assert result.l5_rate == Decimal("0.7500")
+    assert result.l5_formatted == "3/4 (75.0%)"
+    assert result.form_dots == "🟢🔴🟢🟢"
+
+
+def test_over_unchanged_without_pushes() -> None:
+    result = compute_rolling_hit_rate([30, 20, 26, 28, 22], Decimal("25"), "OVER")
     assert result.l5_rate == Decimal("0.6000")
-    assert result.l5_formatted == "3/5 (60.0%)"
+    assert result.l5_total == 5
+    assert result.l5_pushes == 0
+
+
+def test_over_push_excluded() -> None:
+    result = compute_rolling_hit_rate([25, 30, 20], Decimal("25"), "OVER")
+    assert result.l5_hits == 1
+    assert result.l5_total == 2
+    assert result.l5_rate == Decimal("0.5000")
+    assert result.season_pushes == 1
+
+
+@pytest.mark.parametrize("side", ["OVER", "UNDER"])
+def test_all_pushes_rate_none(side: str) -> None:
+    result = compute_rolling_hit_rate([25, 25], Decimal("25"), side)  # type: ignore[arg-type]
+    assert result.l5_rate is None
+    assert result.l10_rate is None
+    assert result.season_rate is None
+    assert result.l5_pushes == 2
+    assert result.l5_total == 0
+
+
+def test_mixed_window_uses_only_most_recent_ten() -> None:
+    # 12 games; pushes at idx 1 and 4 within L10; older games must not backfill window.
+    stats = [10, 25, 10, 10, 25, 10, 10, 10, 10, 10, 30, 30]
+    result = compute_rolling_hit_rate(stats, Decimal("25"), "UNDER")
+    assert result.l10_total == 8
+    assert result.l10_hits == 8
+    assert result.l10_pushes == 2
+    assert result.season_total == 10
+    assert result.season_hits == 8
+
+
+def test_lowercase_selection_normalized() -> None:
+    result = compute_rolling_hit_rate([10, 30], Decimal("20"), "under")  # type: ignore[arg-type]
+    assert result.l5_hits == 1
+    assert normalize_selection(" under ") == "UNDER"
+
+
+def test_invalid_selection_raises() -> None:
+    with pytest.raises(HitRateError):
+        compute_rolling_hit_rate([10], Decimal("20"), "SIDEWAYS")  # type: ignore[arg-type]
 
 
 def test_sample_smaller_than_rolling_windows() -> None:
@@ -321,3 +371,59 @@ def test_update_props_hit_rates_market_disambiguation_and_celery_task(
         td_prop = session.scalar(select(PlayerProp).where(PlayerProp.prop_id == td_id))
         assert pass_prop is not None and pass_prop.hit_rate_l5 == Decimal("0.8000")
         assert td_prop is not None and td_prop.hit_rate_l5 == Decimal("0.6000")
+
+
+def test_update_props_hit_rates_normalizes_lowercase_selection() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    init_db(engine=engine)
+    session_factory = create_session_factory(engine)
+    from datetime import UTC, datetime
+
+    with session_factory() as session:
+        home = Team(external_provider_id="papi_nfl_h", sport_key="nfl", name="H", abbreviation="H")
+        away = Team(external_provider_id="papi_nfl_a", sport_key="nfl", name="A", abbreviation="A")
+        session.add_all([home, away])
+        session.flush()
+        event = Event(
+            external_provider_id="papi_nfl_e",
+            sport_key="nfl",
+            home_team_id=home.team_id,
+            away_team_id=away.team_id,
+            commence_time=datetime(2026, 11, 20, 20, 0, tzinfo=UTC),
+            status="SCHEDULED",
+        )
+        session.add(event)
+        session.flush()
+        prop = PlayerProp(
+            external_provider_id="papi_prop_p",
+            event_id=event.event_id,
+            player_name="Under Guy",
+            market_key="player_rush_yds",
+            selection="under ",
+            line_value=Decimal("25"),
+            offered_decimal_odds=Decimal("1.9091"),
+            sharp_decimal_odds=Decimal("1.9091"),
+        )
+        session.add(prop)
+        session.commit()
+        prop_id = prop.prop_id
+
+    with session_factory() as session:
+        # 24, 20, 25 (push), 28, 22 -> 3 hits / 4 decided
+        assert update_props_hit_rates(session, {"Under Guy": [24, 20, 25, 28, 22]}) == 1
+        row = session.scalar(select(PlayerProp).where(PlayerProp.prop_id == prop_id))
+        assert row is not None
+        assert row.hit_rate_l5 == Decimal("0.7500")
+
+
+def test_push_in_l5_does_not_pull_in_older_game() -> None:
+    # Game 6 (value 10) would be a hit for UNDER 25; it must not backfill L5.
+    result = compute_rolling_hit_rate([10, 10, 25, 30, 30, 10], Decimal("25"), "UNDER")
+    assert result.l5_total == 4
+    assert result.l5_hits == 2
+    assert result.l5_pushes == 1
+    assert result.l10_total == 5
+
+
+def test_normalize_selection_none_is_empty_string() -> None:
+    assert normalize_selection(None) == ""

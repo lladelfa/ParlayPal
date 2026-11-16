@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from parlaypal_worker.hit_rate import normalize_selection
 from parlaypal_worker.models import Event, PlayerProp, Team
 
 logger = logging.getLogger(__name__)
@@ -103,12 +104,24 @@ def _generate_history_free_rationale(
     return text + "."
 
 
+_UNDER_UNITS: dict[str, str] = {
+    "player_pass_yds": "pass yds",
+    "player_rush_yds": "rush yds",
+    "player_points": "points",
+    "player_rebounds": "rebounds",
+    "player_threes": "threes",
+}
+
+
 def generate_conviction_rationale(
     player_name: str,
     market_key: str,
     matchup: str,
     hit_rate_formatted: str | None,
     weather_badge_summary: str | None = None,
+    *,
+    selection: str = "OVER",
+    line_value: Decimal | None = None,
 ) -> str:
     """Generate concise 1-sentence plain-English conviction rationale.
 
@@ -127,7 +140,17 @@ def generate_conviction_rationale(
         return _generate_history_free_rationale(
             player_name, market_key, matchup, weather_badge_summary
         )
-    if "td" in market_key.lower():
+    is_td = "td" in market_key.lower()
+    if not is_td and normalize_selection(selection) == "UNDER":
+        parts = [f"{line_value:.1f}" if line_value is not None else ""]
+        parts.append(_UNDER_UNITS.get(market_key.lower(), ""))
+        target = " ".join(p for p in parts if p)
+        target = f"{target} " if target else ""
+        return (
+            f"{player_name} stayed under {target}in "
+            f"{hit_rate_formatted}; price and matchup in {matchup} set the angle."
+        )
+    if is_td:
         if weather_badge_summary and "wind" in weather_badge_summary.lower():
             return (
                 f"{player_name} has scored a touchdown in {hit_rate_formatted}; strong ground-game script "
@@ -454,6 +477,8 @@ def generate_curated_presets(
             matchup=matchup,
             hit_rate_formatted=hit_display,
             weather_badge_summary=weather_summary_str,
+            selection=prop.selection,
+            line_value=prop.line_value,
         )
 
         assert prop.fair_probability is not None
