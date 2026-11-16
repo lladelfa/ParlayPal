@@ -44,3 +44,13 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge.md`
   summary: Mark web fallback fixture feeds as sample data in the UI and recompute fixture card-level scores.
   evidence: Fixtures keep real-looking odds/EV and card hybridValueScore values derived from the old 70-80% hit rates.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-selection-aware-hit-rate-for-under-legs.md`
+  summary: Recompute persisted hit rates written under the old push-as-miss logic (backfill only fills NULL columns).
+  evidence: `ingestion.py` backfill skips non-None rates, so existing `player_props` rows keep stale values until their rates are cleared.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-selection-aware-hit-rate-for-under-legs.md`
+  summary: Carry real hits/total into the preset and market-browser display instead of deriving N/10 from the rate.
+  evidence: `round(rate*10)` over a push-shrunk denominator can show an N/10 that was never an actual count.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-selection-aware-hit-rate-for-under-legs.md`
+  summary: Classify anytime-TD by exact market (not `"td"` substring) so pass-TD Unders get under-direction copy.
+  evidence: `generate_conviction_rationale` uses `"td" in market_key`, so `player_pass_tds` UNDER gets "has scored a touchdown" copy.
