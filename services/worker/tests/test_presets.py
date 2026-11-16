@@ -8,7 +8,11 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine, select
 
+from parlaypal_worker.db import create_session_factory, init_db
+from parlaypal_worker.hit_rate import build_recent_form_display
+from parlaypal_worker.ingestion import build_local_seed_slate, upsert_slate_to_db
 from parlaypal_worker.models import Event, PlayerProp
 from parlaypal_worker.presets import (
     CuratedPresetFeed,
@@ -93,7 +97,7 @@ def test_conviction_micro_copy_generation() -> None:
     )
     assert "Derrick Henry" in copy_td
     assert "7/10" in copy_td or "70.0%" in copy_td
-    assert "touchdown" in copy_td.lower() or "td" in copy_td.lower()
+    assert "scored in 7/10" in copy_td
 
     # NFL Passing Yards with wind warning
     copy_wind = generate_conviction_rationale(
@@ -151,11 +155,12 @@ def test_over_rationale_defaults_identical() -> None:
         "market_key": "player_rush_yds",
         "matchup": "BAL @ PIT",
         "hit_rate_formatted": "7/10 (70.0%)",
+        "line_value": Decimal("80.5"),
     }
-    assert generate_conviction_rationale(
-        **kwargs, selection="OVER", line_value=Decimal("80.5")
-    ) == generate_conviction_rationale(**kwargs)
-    assert "surpassed rushing line" in generate_conviction_rationale(**kwargs)
+    assert generate_conviction_rationale(**kwargs, selection="OVER") == (
+        generate_conviction_rationale(**kwargs)
+    )
+    assert "cleared 80.5 rush yds in 7/10 (70.0%)" in generate_conviction_rationale(**kwargs)
 
 
 def test_calculate_combined_parlay() -> None:
@@ -790,3 +795,307 @@ def test_curated_presets_forward_under_selection_to_rationale() -> None:
         assert "stayed under 28.5" in leg.conviction_rationale
         assert "surpassed" not in leg.conviction_rationale
         assert "cleared" not in leg.conviction_rationale
+
+
+BANNED = [
+    "red-zone",
+    "high-leverage",
+    "touch volume",
+    "high-volume",
+    "cleaning the glass",
+    "usage",
+    "catch-and-shoot",
+    "trajectory",
+    "ground-game",
+    "elevates",
+]
+ALL_MARKETS = [
+    "player_pass_yds",
+    "player_rush_yds",
+    "player_points",
+    "player_rebounds",
+    "player_threes",
+    "player_other",
+    "player_anytime_td",
+]
+PRICE: dict[str, Any] = {
+    "fair_probability": Decimal("0.4762"),
+    "offered_decimal_odds": Decimal("2.0500"),
+    "guarded_ev": Decimal("0.0320"),
+}
+
+
+def test_over_with_history_cites_line_price_fair_ev() -> None:
+    text = generate_conviction_rationale(
+        "Pat",
+        "player_pass_yds",
+        "KC @ BUF",
+        "7/10 (70.0%) L10",
+        selection="OVER",
+        line_value=Decimal("274.5"),
+        fair_probability=Decimal("0.4762"),
+        offered_decimal_odds=Decimal("2.05"),
+        guarded_ev=Decimal("0.032"),
+    )
+    assert text == (
+        "Pat cleared 274.5 pass yds in 7/10 (70.0%) L10; +105 offered vs +110 fair (+3.2% EV)."
+    )
+
+
+def test_under_with_history_cites_price() -> None:
+    text = generate_conviction_rationale(
+        "Pat",
+        "player_rush_yds",
+        "A @ B",
+        "6/10 (60.0%) L10",
+        selection="UNDER",
+        line_value=Decimal("28.5"),
+        **PRICE,
+    )
+    assert text.startswith("Pat stayed under 28.5 rush yds in 6/10 (60.0%) L10; +105 offered")
+
+
+def test_under_pass_tds_reads_under_and_anytime_td_scored() -> None:
+    under = generate_conviction_rationale(
+        "Pat",
+        "player_pass_tds",
+        "A @ B",
+        "6/10 (60.0%) L10",
+        selection="UNDER",
+        line_value=Decimal("1.5"),
+    )
+    assert "stayed under 1.5 pass TDs in" in under
+    td = generate_conviction_rationale(
+        "Pat",
+        "player_anytime_td",
+        "A @ B",
+        "7/10 (70.0%) L10",
+        selection="UNDER",
+        **PRICE,
+    )
+    assert td.startswith("Pat scored in 7/10 (70.0%) L10; ")
+
+
+def test_no_hit_rate_uses_price_vs_fair() -> None:
+    text = generate_conviction_rationale(
+        "Pat",
+        "player_points",
+        "A @ B",
+        None,
+        line_value=Decimal("22.5"),
+        **PRICE,
+    )
+    assert "+105 offered vs +110 fair (+3.2% EV)" in text
+    assert "/10" not in text
+    assert "A @ B" in text
+
+
+def test_long_shot_has_no_consistency_claim() -> None:
+    text = generate_conviction_rationale(
+        "Pat",
+        "player_anytime_td",
+        "A @ B",
+        "7/10 (70.0%) L10",
+        fair_probability=Decimal("0.03"),
+        offered_decimal_odds=Decimal("37.04"),
+        guarded_ev=Decimal("0.05"),
+    )
+    assert "+3604 offered vs +3233 fair" in text
+    assert "3.0% implied" in text
+    for word in ("7/10", "70.0%", "scored", "cleared", "stayed"):
+        assert word not in text
+
+
+def test_wind_badge_verbatim_without_causal_claim() -> None:
+    text = generate_conviction_rationale(
+        "Josh", "player_pass_yds", "BUF @ NYJ", "8/10 (80.0%) L10", "⚠️ 19mph Wind", **PRICE
+    )
+    assert "(⚠️ 19mph Wind)" in text
+    for word in BANNED:
+        assert word not in text
+
+
+def test_no_price_data_states_no_claims() -> None:
+    text = generate_conviction_rationale("Pat", "player_points", "A @ B", None)
+    assert text == "Pat: Over points in A @ B."
+    assert "None" not in text and "offered" not in text and "EV" not in text
+
+
+def test_unknown_ev_never_prints_default() -> None:
+    text = generate_conviction_rationale(
+        "Pat", "player_points", "A @ B", "6/10 (60.0%) L10", **{**PRICE, "guarded_ev": None}
+    )
+    assert "EV" not in text
+    assert "+2.0%" not in text
+
+
+@pytest.mark.parametrize("market_key", ALL_MARKETS)
+@pytest.mark.parametrize("hit", [None, "7/10 (70.0%) L10"])
+@pytest.mark.parametrize("selection", ["OVER", "UNDER"])
+@pytest.mark.parametrize("fair", [Decimal("0.03"), Decimal("0.5")])
+def test_banned_phrases_and_no_raw_keys(
+    market_key: str, hit: str | None, selection: str, fair: Decimal
+) -> None:
+    text = generate_conviction_rationale(
+        "Pat",
+        market_key,
+        "A @ B",
+        hit,
+        "⚠️ 19mph Wind",
+        selection=selection,
+        line_value=Decimal("4.5"),
+        fair_probability=fair,
+        offered_decimal_odds=Decimal("2.5"),
+        guarded_ev=Decimal("0.02"),
+    )
+    lowered = text.lower()
+    for word in BANNED:
+        assert word not in lowered
+    assert "player_" not in text
+    assert "None" not in text
+
+
+def test_distinct_inputs_give_distinct_rationales() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 5, outcomes=SEVEN_OF_TEN)
+    for i, prop in enumerate(props):
+        prop.line_value = Decimal("20.5") + i
+        prop.offered_decimal_odds = Decimal("1.80") + Decimal(i) / 10
+        prop.fair_probability = Decimal("0.50") + Decimal(i) / 100
+        prop.player_name = "Same Player"
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now, target_count=5))
+    texts = {leg.prop_id: leg.conviction_rationale for leg in legs}
+    assert len(texts) > 1
+    assert len(set(texts.values())) == len(texts)
+
+
+def test_curated_presets_forward_price_facts_to_rationale() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3, outcomes=SEVEN_OF_TEN)
+    for prop in props:
+        prop.offered_decimal_odds = Decimal("2.0500")
+        prop.fair_probability = Decimal("0.4762")
+        prop.guarded_ev = Decimal("0.0320")
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now))
+    assert legs
+    for leg in legs:
+        assert "+105 offered vs +110 fair (+3.2% EV)" in leg.conviction_rationale
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return lambda *a, **k: None
+
+
+def test_seed_slate_rationales_distinct_for_distinct_inputs() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    init_db(engine=engine)
+    session = create_session_factory(engine)()
+    try:
+        now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+        upsert_slate_to_db(
+            session, build_local_seed_slate(now), now_utc=now, redis_client=_FakeRedis()
+        )
+        props = list(session.scalars(select(PlayerProp)).all())
+        assert len(props) >= 12
+        seen: dict[str, tuple[Any, ...]] = {}
+        for prop in props:
+            hit, _, _ = build_recent_form_display(prop.hit_rate_l10, prop.recent_outcomes)
+            text = generate_conviction_rationale(
+                prop.player_name,
+                prop.market_key,
+                "A @ B",
+                hit,
+                selection=prop.selection,
+                line_value=prop.line_value,
+                fair_probability=prop.fair_probability,
+                offered_decimal_odds=prop.offered_decimal_odds,
+                guarded_ev=prop.guarded_ev,
+            )
+            key = (prop.player_name, prop.market_key, prop.line_value, prop.offered_decimal_odds)
+            assert text not in seen or seen[text] == key, text
+            seen[text] = key
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_precip_badge_verbatim_and_dome_suppressed() -> None:
+    precip = generate_conviction_rationale(
+        "P", "player_points", "A @ B", "6/10 (60.0%) L10", "🌧️ 40% Precip"
+    )
+    assert "(🌧️ 40% Precip)" in precip
+    dome = generate_conviction_rationale(
+        "P", "player_points", "A @ B", "6/10 (60.0%) L10", "DOME Indoor"
+    )
+    assert "DOME" not in dome
+
+
+def test_negative_ev_and_favourite_fair_price() -> None:
+    text = generate_conviction_rationale(
+        "P",
+        "player_points",
+        "A @ B",
+        "6/10 (60.0%) L10",
+        line_value=Decimal("20.5"),
+        fair_probability=Decimal("0.6"),
+        offered_decimal_odds=Decimal("1.6"),
+        guarded_ev=Decimal("-0.0400"),
+    )
+    assert "-150 fair" in text
+    assert "(-4.0% EV)" in text
+
+
+def test_exactly_ten_percent_is_not_long_shot() -> None:
+    text = generate_conviction_rationale(
+        "P",
+        "player_anytime_td",
+        "A @ B",
+        "7/10 (70.0%) L10",
+        fair_probability=Decimal("0.10"),
+        offered_decimal_odds=Decimal("10.0"),
+    )
+    assert "scored in 7/10" in text
+
+
+def test_only_offered_and_only_fair_branches() -> None:
+    offered = generate_conviction_rationale(
+        "P", "player_points", "A @ B", "6/10 (60.0%) L10", offered_decimal_odds=Decimal("2.05")
+    )
+    assert "; +105 offered." in offered and "fair" not in offered
+    fair = generate_conviction_rationale(
+        "P", "player_points", "A @ B", "6/10 (60.0%) L10", fair_probability=Decimal("0.4762")
+    )
+    assert "; +110 fair." in fair and "offered" not in fair
+
+
+def test_history_without_line_says_the_line() -> None:
+    text = generate_conviction_rationale("P", "player_other", "A @ B", "6/10 (60.0%) L10")
+    assert text.startswith("P cleared the line in 6/10")
+
+
+def test_long_shot_with_weather_and_history_omits_hit_rate() -> None:
+    text = generate_conviction_rationale(
+        "P",
+        "player_anytime_td",
+        "A @ B",
+        "7/10 (70.0%) L10",
+        "⚠️ 19mph Wind",
+        fair_probability=Decimal("0.03"),
+        offered_decimal_odds=Decimal("37.04"),
+    )
+    assert "(⚠️ 19mph Wind)" in text
+    assert "7/10" not in text and "L10" not in text
+
+
+def test_pass_tds_under_has_unit() -> None:
+    text = generate_conviction_rationale(
+        "P",
+        "player_pass_tds",
+        "A @ B",
+        "6/10 (60.0%) L10",
+        selection="UNDER",
+        line_value=Decimal("1.5"),
+    )
+    assert "stayed under 1.5 pass TDs in 6/10" in text

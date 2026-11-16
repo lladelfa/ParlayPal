@@ -58,3 +58,10 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-3-real-recent-form-dots-from-game-logs.md`
   summary: Add a Postgres-backed (or mocked-connection) test for the `ALTER TABLE player_props ADD COLUMN IF NOT EXISTS recent_outcomes` upgrade in `init_db`.
   evidence: Tests run on SQLite where the ALTER is skipped; breaking the Postgres branch would fail every PlayerProp query on existing databases without any test noticing.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-evidence-based-conviction-rationale.md`
+  summary: Make Under anytime-TD (a "No TD" bet) read in the under direction instead of "scored in {hit}".
+  evidence: Selection tokens `no` normalize to UNDER and the hit rate is computed with the Under rule, but frozen 6.4 copy keeps TD Over-style for any selection, so the sentence can contradict the label.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-4-evidence-based-conviction-rationale.md`
+  summary: Stop defaulting a missing `guarded_ev` to `Decimal("0.0200")` on the persisted `PresetLeg`.
+  evidence: `presets.py` sets `guarded_ev=prop.guarded_ev or Decimal("0.0200")`, a fabricated EV that feeds the preset score and display (the rationale already avoids it).
