@@ -73,44 +73,64 @@ def calculate_hybrid_value_score(
     return clamped_score
 
 
-def _generate_history_free_rationale(
-    player_name: str,
-    market_key: str,
-    matchup: str,
-    weather_badge_summary: str | None,
-) -> str:
-    """Rationale for legs without recent-form data: no past-performance claims."""
-    key = market_key.lower()
-    if "td" in key:
-        subject = "anytime touchdown price"
-    elif "pass" in key:
-        subject = "passing line"
-    elif "rush" in key:
-        subject = "rushing line"
-    elif "points" in key:
-        subject = "scoring line"
-    elif "rebounds" in key:
-        subject = "rebounding line"
-    elif "threes" in key:
-        subject = "perimeter-shooting line"
-    else:
-        subject = "line"
-    text = (
-        f"{player_name}: limited recent-form history, so the {subject} "
-        f"is judged on price and matchup in {matchup}"
-    )
-    if weather_badge_summary and "wind" in weather_badge_summary.lower():
-        text += f" ({weather_badge_summary})"
-    return text + "."
-
-
-_UNDER_UNITS: dict[str, str] = {
+_MARKET_UNITS: dict[str, str] = {
     "player_pass_yds": "pass yds",
     "player_rush_yds": "rush yds",
     "player_points": "points",
     "player_rebounds": "rebounds",
     "player_threes": "threes",
+    "player_pass_tds": "pass TDs",
 }
+
+_LONG_SHOT_THRESHOLD = Decimal("0.10")
+
+
+def _is_anytime_td(market_key: str) -> bool:
+    key = market_key.lower()
+    return "anytime" in key and "td" in key
+
+
+def _format_american(decimal_odds: Decimal | None) -> str | None:
+    """Format decimal odds as a signed American price, or None when unusable."""
+    if decimal_odds is None or decimal_odds < Decimal("1.01"):
+        return None
+    return f"{decimal_to_american(decimal_odds):+d}"
+
+
+def _format_fair_american(fair_probability: Decimal | None) -> str | None:
+    """Format the devigged fair price (American) derived from a fair probability."""
+    if fair_probability is None or fair_probability <= 0 or fair_probability >= 1:
+        return None
+    return _format_american(Decimal(1) / fair_probability)
+
+
+def _format_ev(guarded_ev: Decimal | None) -> str | None:
+    if guarded_ev is None:
+        return None
+    return f"{float(guarded_ev) * 100:+.1f}%"
+
+
+def _weather_suffix(weather_badge_summary: str | None) -> str:
+    if weather_badge_summary:
+        lowered = weather_badge_summary.lower()
+        if "wind" in lowered or "precip" in lowered:
+            return f" ({weather_badge_summary})"
+    return ""
+
+
+def _line_target(market_key: str, line_value: Decimal | None) -> str:
+    parts = [f"{line_value:.1f}" if line_value is not None else ""]
+    parts.append(_MARKET_UNITS.get(market_key.lower(), ""))
+    return " ".join(p for p in parts if p) or "the line"
+
+
+def _market_label(market_key: str, selection: str, line_value: Decimal | None) -> str:
+    if _is_anytime_td(market_key):
+        return "anytime TD"
+    side = "Under" if normalize_selection(selection) == "UNDER" else "Over"
+    unit = _MARKET_UNITS.get(market_key.lower(), "")
+    parts = [side, f"{line_value:.1f}" if line_value is not None else "", unit]
+    return " ".join(p for p in parts if p) if (line_value is not None or unit) else "prop"
 
 
 def generate_conviction_rationale(
@@ -122,79 +142,72 @@ def generate_conviction_rationale(
     *,
     selection: str = "OVER",
     line_value: Decimal | None = None,
+    fair_probability: Decimal | None = None,
+    offered_decimal_odds: Decimal | None = None,
+    guarded_ev: Decimal | None = None,
 ) -> str:
-    """Generate concise 1-sentence plain-English conviction rationale.
+    """Generate a one-sentence rationale built only from data present on the leg.
 
     Args:
         player_name: Player name (e.g. 'Derrick Henry').
         market_key: Prop market key (e.g. 'player_anytime_td', 'player_points').
         matchup: Game matchup (e.g. 'BAL @ PIT').
-        hit_rate_formatted: Formatted hit rate string (e.g. '7/10 (70.0%)'). When None, the
-            rationale makes no claim about past performance.
-        weather_badge_summary: Optional weather context summary (e.g. '⚠️ 19mph Wind').
+        hit_rate_formatted: Formatted hit rate (e.g. '7/10 (70.0%) L10'); None when unknown.
+        weather_badge_summary: Optional weather badge text, quoted verbatim for wind/precip.
+        selection: OVER or UNDER.
+        line_value: Prop line.
+        fair_probability: Devigged fair probability, when known.
+        offered_decimal_odds: Offered decimal price, when known.
+        guarded_ev: Raw guarded EV (fraction), when known.
 
     Returns:
-        1-sentence plain-English conviction statement.
+        1-sentence statement citing only the supplied facts. A long shot (fair probability
+        below 10%) intentionally omits the hit rate even when history exists. The matchup is
+        cited only on the no-hit-rate / long-shot path. Weather badges are quoted verbatim
+        for wind and precipitation only; other badges (e.g. DOME) are suppressed.
     """
-    if hit_rate_formatted is None:
-        return _generate_history_free_rationale(
-            player_name, market_key, matchup, weather_badge_summary
-        )
-    is_td = "td" in market_key.lower()
-    if not is_td and normalize_selection(selection) == "UNDER":
-        parts = [f"{line_value:.1f}" if line_value is not None else ""]
-        parts.append(_UNDER_UNITS.get(market_key.lower(), ""))
-        target = " ".join(p for p in parts if p)
-        target = f"{target} " if target else ""
-        return (
-            f"{player_name} stayed under {target}in "
-            f"{hit_rate_formatted}; price and matchup in {matchup} set the angle."
-        )
-    if is_td:
-        if weather_badge_summary and "wind" in weather_badge_summary.lower():
-            return (
-                f"{player_name} has scored a touchdown in {hit_rate_formatted}; strong ground-game script "
-                f"expected in {matchup} ({weather_badge_summary})."
-            )
-        return (
-            f"{player_name} has scored a touchdown in {hit_rate_formatted}; red-zone focal point "
-            f"in high-leverage {matchup} matchup."
-        )
-    elif "pass" in market_key.lower():
-        if weather_badge_summary and "wind" in weather_badge_summary.lower():
-            return (
-                f"{player_name} cleared passing line in {hit_rate_formatted}; weather threat "
-                f"({weather_badge_summary}) elevates short-yardage target volume in {matchup}."
-            )
-        return (
-            f"{player_name} cleared passing mark in {hit_rate_formatted}; "
-            f"averaging high-volume attempts heading into {matchup}."
-        )
-    elif "rush" in market_key.lower():
-        return (
-            f"{player_name} surpassed rushing line in {hit_rate_formatted}; "
-            f"heavy touch volume established heading into {matchup}."
-        )
-    elif "points" in market_key.lower():
-        return (
-            f"{player_name} surpassed scoring target in {hit_rate_formatted}; "
-            f"commanding primary offensive usage in {matchup}."
-        )
-    elif "rebounds" in market_key.lower():
-        return (
-            f"{player_name} secured rebound target in {hit_rate_formatted}; "
-            f"consistently cleaning the glass heading into {matchup}."
-        )
-    elif "threes" in market_key.lower():
-        return (
-            f"{player_name} sank perimeter target in {hit_rate_formatted}; "
-            f"high-efficiency catch-and-shoot volume in {matchup}."
-        )
+    offered = _format_american(offered_decimal_odds)
+    fair = _format_fair_american(fair_probability)
+    ev = _format_ev(guarded_ev)
+    weather = _weather_suffix(weather_badge_summary)
+    long_shot = fair_probability is not None and fair_probability < _LONG_SHOT_THRESHOLD
+
+    if offered and fair:
+        price = f"{offered} offered vs {fair} fair"
+    elif offered:
+        price = f"{offered} offered"
+    elif fair:
+        price = f"{fair} fair"
     else:
-        return (
-            f"{player_name} satisfied line in {hit_rate_formatted}; "
-            f"reliable statistical trajectory leading into {matchup}."
-        )
+        price = ""
+
+    if hit_rate_formatted is not None and not long_shot:
+        if _is_anytime_td(market_key):
+            text = f"{player_name} scored in {hit_rate_formatted}"
+        elif normalize_selection(selection) == "UNDER":
+            text = (
+                f"{player_name} stayed under {_line_target(market_key, line_value)} "
+                f"in {hit_rate_formatted}"
+            )
+        else:
+            text = (
+                f"{player_name} cleared {_line_target(market_key, line_value)} "
+                f"in {hit_rate_formatted}"
+            )
+        if price:
+            text += f"; {price}"
+        if ev:
+            text += f" ({ev} EV)" if price else f"; {ev} EV"
+        return f"{text}{weather}."
+
+    text = f"{player_name}: {_market_label(market_key, selection, line_value)}"
+    if price:
+        text += f" at {price}"
+    if long_shot and fair_probability is not None:
+        text += f" ({float(fair_probability) * 100:.1f}% implied)"
+    if ev:
+        text += f" ({ev} EV)"
+    return f"{text} in {matchup}{weather}."
 
 
 class PresetLeg(BaseModel):
@@ -466,6 +479,9 @@ def generate_curated_presets(
             weather_badge_summary=weather_summary_str,
             selection=prop.selection,
             line_value=prop.line_value,
+            fair_probability=prop.fair_probability,
+            offered_decimal_odds=prop.offered_decimal_odds,
+            guarded_ev=prop.guarded_ev,
         )
 
         assert prop.fair_probability is not None

@@ -2,7 +2,8 @@
 title: 'Story 6.4: Evidence-Based Conviction Rationale'
 type: 'feature'
 created: '2026-11-16'
-status: 'in-progress'
+status: 'done'
+baseline_commit: '2f07895f1d06d2994748c0db8f785f4356698ae2'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -86,3 +87,15 @@ context:
 - `uv run --directory services/worker mypy parlaypal_worker tests` -- expected: 0 errors
 - `uv run --directory services/worker pytest -v` -- expected: all pass
 - `npm --prefix apps/web run typecheck` and `npm --prefix apps/web test -- --run` -- expected: pass (no web changes expected)
+
+| Finding | Verdict | Route | Evidence |
+|---|---|---|---|
+| Forwarding of fair/offered/EV at the call site unproven; distinctness test passes via distinct player names | medium | patch | Dropping the kwargs at `presets.py:~470-481` leaves all tests green. |
+| Distinctness test not run over the real seed slate (AC) | medium | patch | Uses synthetic `_slate` props only. |
+| Precip badge, negative EV, fair >= 0.5 sign, 0.10 boundary, partial price branches, line None, long shot + weather untested | low | patch | Each branch can regress silently. |
+| `player_pass_tds` has no unit ("stayed under 1.5 in 6/10") | low | patch | `_MARKET_UNITS` lacks TD-count markets. |
+| Long-shot omission of hit rate / matchup placement undocumented | low | patch | Docstring only. |
+| Under on anytime TD reads "scored in {hit}" (hit rate is under-based, can contradict) | medium | defer | Frozen spec and epic AC mandate TD stays Over-style for any selection. |
+| `guarded_ev or 0.0200` default persisted on the leg | low | defer | Spec says log, not fix. |
+| `0/0` sentinel, fair <= 0, line precision, unknown selection, "No wind" badge, `-0.0%`, float display math | false/low | rejected | Unreachable (labels are None without data, selection normalized at ingest, badges only built for threats) or cosmetic. |
+| Narrow `_is_anytime_td` (first/last TD keys), matchup omitted on history path, price frozen at generation, readability/duplication | low | rejected | Deliberate spec design; feed regenerates each sync within the 45s TTL. |
