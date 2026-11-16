@@ -424,3 +424,19 @@ So that the feed does not repeat the same player across cards or show implausibl
 **And** the quality-gate thresholds are named constants with unit tests covering the boundary values.
 
 **Open question:** confirm whether Carson Beck "Under 11.5 Rush Yds" is a data/mapping error before tuning the plausibility rule.
+
+### Story 6.7: API-Sports Game-Log Provider Adapter (NBA & NFL)
+
+As a bettor,
+I want live NBA and NFL props to show real hit rates from actual game logs,
+So that consistency data exists for the players on today's slate.
+
+**Acceptance Criteria:**
+
+**Given** a paid api-sports plan and the 6.5 game-log plumbing (budget, cache, deadline, breaker),
+**When** the live sync runs for NBA `player_points/rebounds/threes` and NFL `player_pass_yds/rush_yds` props,
+**Then** a provider adapter resolves player names to api-sports IDs (cached permanently), fetches per-game stats, and returns most-recent-first `Decimal` logs keyed by `(player_name, market_key)`,
+**And** NFL logs come from finished games' per-game player statistics (cached indefinitely, since finished games are immutable), never from season totals,
+**And** players that cannot be matched, or have fewer than 5 games, stay `NULL` ("Limited history").
+
+**Task 1 (gate):** with a paid plan, verify current-season (2025/2026) coverage, name-match rate on current rosters, the paid per-minute limit, NBA row ordering and NFL touchdown fields. If coverage fails, stop and keep the 6.5 fetcher disabled.

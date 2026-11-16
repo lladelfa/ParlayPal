@@ -74,6 +74,7 @@ development_status:
   6-4-evidence-based-conviction-rationale: review
   6-5-game-log-ingestion-for-upstream-players: backlog
   6-6-preset-candidate-quality-gate-dedup: backlog
+  6-7-api-sports-game-log-provider-adapter: backlog
   epic-6-retrospective: optional
 
 action_items: []
