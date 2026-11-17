@@ -37,9 +37,16 @@ export default async function HomePage() {
         </div>
       </header>
 
+      {marketFeed.reason === "sample" && (
+        <p className="mb-4 rounded border border-border-hairline bg-surface-module px-3 py-2 text-xs font-semibold text-accent-cyan">
+          Sample data — market browser is showing fixtures (PARLAYPAL_SAMPLE_DATA is on).
+        </p>
+      )}
+
       {/* Main Terminal View (Preset Feed + Schedule & Market Browser) */}
       <TerminalView
         initialPresets={presetFeed.cards}
+        presetReason={presetFeed.reason}
         initialMarketFeed={marketFeed}
       />
     </main>

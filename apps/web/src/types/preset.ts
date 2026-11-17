@@ -45,9 +45,17 @@ export interface PresetCard {
   commenceTime: string;
 }
 
+export type FeedReason =
+  | "live"
+  | "no_qualifying_presets"
+  | "feed_unavailable"
+  | "sample";
+
 export interface CuratedPresetFeed {
   generatedAt: string;
   cards: PresetCard[];
+  /** Why the feed looks the way it does; absent on feeds not built by the loader. */
+  reason?: FeedReason;
 }
 
 export interface OddsDeltaFrame {

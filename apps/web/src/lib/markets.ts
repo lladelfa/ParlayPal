@@ -5,6 +5,7 @@ import type {
   ValueTier,
 } from "@/types/market";
 import { createRedisClient, marketsBrowserKey } from "@/lib/redis";
+import { sampleDataEnabled } from "@/lib/presets";
 import {
   CANONICAL_MARKETS_BY_SPORT,
   filterMarketProps,
@@ -475,11 +476,11 @@ export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBro
     if (cached) {
       const normalized = normalizeMarketBrowserFeed(JSON.parse(cached));
       if (normalized && Array.isArray(normalized.props)) {
-        return normalized;
+        return { ...normalized, reason: "live" };
       }
     }
   } catch (err) {
-    console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback market feed.`);
+    console.warn(`Redis unavailable (${(err as Error).message}); market feed unavailable.`);
   } finally {
     if (redis) {
       try {
@@ -490,22 +491,27 @@ export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBro
     }
   }
 
-  if (sportKey && sportKey.toLowerCase().includes("nfl")) {
+  if (!sampleDataEnabled()) {
     return {
       generatedAt: new Date().toISOString(),
-      sportKey: "nfl",
-      games: FALLBACK_MARKET_BROWSER_FEED.games.filter((g) => g.sportKey === "nfl"),
-      props: FALLBACK_MARKET_BROWSER_FEED.props.filter((p) => p.sportKey === "nfl"),
-    };
-  }
-  if (sportKey && sportKey.toLowerCase().includes("nba")) {
-    return {
-      generatedAt: new Date().toISOString(),
-      sportKey: "nba",
-      games: FALLBACK_MARKET_BROWSER_FEED.games.filter((g) => g.sportKey === "nba"),
-      props: FALLBACK_MARKET_BROWSER_FEED.props.filter((p) => p.sportKey === "nba"),
+      sportKey: sportKey ?? "all",
+      games: [],
+      props: [],
+      reason: "feed_unavailable",
     };
   }
 
-  return FALLBACK_MARKET_BROWSER_FEED;
+  const sport = sportKey?.toLowerCase();
+  const only = sport?.includes("nfl") ? "nfl" : sport?.includes("nba") ? "nba" : null;
+  if (only) {
+    return {
+      generatedAt: new Date().toISOString(),
+      sportKey: only,
+      games: FALLBACK_MARKET_BROWSER_FEED.games.filter((g) => g.sportKey === only),
+      props: FALLBACK_MARKET_BROWSER_FEED.props.filter((p) => p.sportKey === only),
+      reason: "sample",
+    };
+  }
+
+  return { ...FALLBACK_MARKET_BROWSER_FEED, reason: "sample" };
 }

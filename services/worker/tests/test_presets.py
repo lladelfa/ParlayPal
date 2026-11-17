@@ -1228,3 +1228,24 @@ def test_outlier_breaker_still_excludes_after_gate() -> None:
     props[0].guarded_ev = Decimal("0.1001")
     feed = generate_curated_presets(props, events, now_utc=now)
     assert props[0].prop_id not in _prop_ids(feed)
+
+
+def test_generation_logs_drop_reasons(caplog: pytest.LogCaptureFixture) -> None:
+    props, events, now = _gate_slate(
+        [
+            ("Suspended One", "nba", "player_points", Decimal("0.5000")),
+            ("Low Fair", "nba", "player_points", Decimal("0.0500")),
+            ("Fine One", "nba", "player_points", Decimal("0.5000")),
+        ]
+    )
+    props[0].status = "SUSPENDED"
+    with caplog.at_level("INFO"):
+        generate_curated_presets(props, events, now_utc=now)
+    summary = [
+        r.getMessage() for r in caplog.records if "Preset generation drops" in r.getMessage()
+    ]
+    assert summary, [r.getMessage() for r in caplog.records]
+    assert "status=1" in summary[0]
+    assert "below_min_fair_probability=1" in summary[0]
+    assert "candidates=3" in summary[0]
+    assert "cards=0" in summary[0]
