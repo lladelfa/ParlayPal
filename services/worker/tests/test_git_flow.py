@@ -255,6 +255,41 @@ def test_ship_all_with_no_push_commits_locally_only(
     assert remote_calls == []
 
 
+def test_commit_stages_and_commits_without_pushing(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git_flow = load_git_flow()
+    remote_calls = _intercept_remote_calls(git_flow, monkeypatch)
+
+    _git(git_repo, "checkout", "-b", "feat/7-4-commit-only")
+    (git_repo / "wanted.py").write_text("x = 1\n", encoding="utf-8")
+    (git_repo / "unwanted.py").write_text("y = 2\n", encoding="utf-8")
+
+    monkeypatch.chdir(git_repo)
+    exit_code = git_flow.main(["commit", "-m", "feat: local only", "--files", "wanted.py"])
+
+    assert exit_code == 0
+    committed_files = _git(
+        git_repo, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout.splitlines()
+    assert "wanted.py" in committed_files
+    assert "unwanted.py" not in committed_files
+    assert remote_calls == []
+
+
+def test_commit_refuses_main(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git_flow = load_git_flow()
+    _intercept_remote_calls(git_flow, monkeypatch)
+    (git_repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+
+    monkeypatch.chdir(git_repo)
+    assert git_flow.main(["commit", "-m", "feat: nope", "--all"]) == 2
+
+
 def test_sync_updates_main_from_origin_and_refuses_dirty_tree(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,

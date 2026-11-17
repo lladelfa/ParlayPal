@@ -80,8 +80,8 @@ development_status:
   epic-7: in-progress
   7-1-honest-empty-state-feed-diagnostics: done
   7-2-remove-fabricated-guarded_ev-default: done
-  7-3-canonical-prop-market-keys: review
-  7-4-developer-loop-chores: backlog
+  7-3-canonical-prop-market-keys: done
+  7-4-developer-loop-chores: review
   epic-7-retrospective: optional
 
   epic-8: backlog
@@ -113,7 +113,7 @@ action_items:
       Carson Beck note in epics.md, mark the 6.5 game-log source entry resolved in
       deferred-work.md"
     owner: "human"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
   - id: "epic-6-retro-item-4-verify-epic-6-outcome-in-the-running-app"
     epic: 6
@@ -128,7 +128,7 @@ action_items:
     action: "Log MoneyLine x-credits-remaining in the game-log cycle summary and watch
       the credit balance during the first week"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
   - id: "epic-6-retro-item-6-schedule-a-story-to-remove-the-fabricate"
     epic: 6
@@ -142,7 +142,7 @@ action_items:
     action: "Add a commit-only subcommand to git_flow.py and align AGENTS.md with
       the no-auto-push workflow rule"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
   - id: "epic-6-retro-item-8-process-hygiene-fetch-before-creating-wo"
     epic: 6

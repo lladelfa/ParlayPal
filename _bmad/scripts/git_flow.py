@@ -250,6 +250,17 @@ def cmd_ship(
     return 0
 
 
+def cmd_commit(
+    repo_root: Path,
+    message: str,
+    *,
+    files: list[str] | None = None,
+    stage_all: bool = False,
+) -> int:
+    """Stage and commit on a non-main branch without pushing."""
+    return cmd_ship(repo_root, message, files=files, stage_all=stage_all, no_push=True)
+
+
 def cmd_sync(repo_root: Path, *, base: str = "main") -> int:
     """Switch to base branch, fast-forward from origin, and prune stale refs."""
     if is_dirty(repo_root):
@@ -292,7 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Deterministic ParlayPal Git workflow CLI "
-            "(start, ship, sync, install-aliases)."
+            "(start, ship, commit, sync, install-aliases)."
         )
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -327,6 +338,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-push",
         action="store_true",
         help="Commit locally without pushing to origin.",
+    )
+
+    commit_parser = subparsers.add_parser(
+        "commit",
+        help="Stage and commit (blocking main/master) without pushing.",
+    )
+    commit_parser.add_argument("-m", "--message", required=True, help="Commit message.")
+    commit_group = commit_parser.add_mutually_exclusive_group()
+    commit_group.add_argument("--files", nargs="+", help="Specific file paths to stage.")
+    commit_group.add_argument(
+        "--all", action="store_true", help="Stage all changes (`git add -A`)."
     )
 
     sync_parser = subparsers.add_parser(
@@ -371,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
             stage_all=args.all,
             no_push=args.no_push,
         )
+    if args.command == "commit":
+        return cmd_commit(repo_root, args.message, files=args.files, stage_all=args.all)
     if args.command == "sync":
         return cmd_sync(repo_root, base=args.base)
     if args.command == "install-aliases":

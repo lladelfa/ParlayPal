@@ -436,7 +436,7 @@ So that the feed does not repeat the same player across cards or show implausibl
 **And** the Outlier Circuit Breaker rule (`EV_guarded > 10%` is `SUSPECT_STALE_LINE` and never published) is unaffected,
 **And** the quality-gate thresholds are named constants with unit tests covering the boundary values.
 
-**Open question:** confirm whether Carson Beck "Under 11.5 Rush Yds" is a data/mapping error before tuning the plausibility rule.
+**Decision (spec 6-6):** Carson Beck "Under 11.5 Rush Yds" is a valid market; no special-casing.
 
 ### Story 6.7: MoneyLine Game-Log Provider Adapter (NBA & NFL)
 
