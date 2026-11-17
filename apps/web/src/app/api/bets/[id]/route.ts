@@ -5,7 +5,7 @@ import {
   normalizeBetStatusInput,
   validateClvBenchmarkInput,
 } from "@/lib/ledger";
-import { createRedisClient, userBetsKey } from "@/lib/redis";
+import { openRedisClient, userBetsKey } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +98,7 @@ export async function PATCH(req: Request, { params }: RouteParams): Promise<Resp
 
     // Check Redis
     try {
-      const client = createRedisClient();
+      const client = await openRedisClient();
       const raw = await client.get(userBetsKey(userId));
       if (raw) {
         allBets = JSON.parse(raw);
@@ -240,7 +240,7 @@ export async function DELETE(req: Request, { params }: RouteParams) {
       "guest-default";
 
     try {
-      const client = createRedisClient();
+      const client = await openRedisClient();
       const raw = await client.get(userBetsKey(userId));
       if (raw) {
         const allBets: TrackedBet[] = JSON.parse(raw);

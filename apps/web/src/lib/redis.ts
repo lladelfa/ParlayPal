@@ -155,6 +155,18 @@ export function createRedisClient(): RedisClient {
   return activeClientFactory();
 }
 
+/**
+ * Create a client and connect it. The default client is lazy with no offline queue, so any
+ * command issued before connect() fails with "Stream isn't writeable".
+ */
+export async function openRedisClient(): Promise<RedisClient> {
+  const client = createRedisClient();
+  if (typeof client.connect === "function") {
+    await client.connect();
+  }
+  return client;
+}
+
 export function setRedisClientFactory(factory: RedisClientFactory | null): void {
   activeClientFactory = factory ?? defaultClientFactory;
 }
