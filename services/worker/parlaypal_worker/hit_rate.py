@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from parlaypal_worker.market_keys import canonicalize_market_key
 from parlaypal_worker.models import PlayerProp
 
 logger = logging.getLogger(__name__)
@@ -272,7 +273,9 @@ def update_props_hit_rates(
                 continue
 
             # Check specific (player_name, market_key) first, fallback to player_name
-            logs = player_game_logs.get((prop.player_name, prop.market_key))
+            logs = player_game_logs.get(
+                (prop.player_name, canonicalize_market_key(prop.market_key))
+            )
             if logs is None:
                 logs = player_game_logs.get(prop.player_name)
             if not logs:

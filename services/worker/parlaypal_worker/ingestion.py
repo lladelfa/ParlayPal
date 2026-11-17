@@ -35,6 +35,7 @@ from parlaypal_worker.market_browser import (
     normalize_sport_key,
     sync_market_browser_to_redis,
 )
+from parlaypal_worker.market_keys import canonicalize_market_key
 from parlaypal_worker.models import Event, PlayerProp, Team
 from parlaypal_worker.presets import generate_curated_presets, sync_preset_feed_to_redis
 from parlaypal_worker.redis_client import (
@@ -325,7 +326,8 @@ class IngestedSlate(BaseModel):
     def to_player_game_logs(self) -> dict[tuple[str, str], list[Decimal]]:
         """Convert structured game logs to mapping keyed by (player_name, market_key)."""
         return {
-            (entry.player_name, entry.market_key): list(entry.stats) for entry in self.game_logs
+            (entry.player_name, canonicalize_market_key(entry.market_key)): list(entry.stats)
+            for entry in self.game_logs
         }
 
 
@@ -846,7 +848,7 @@ def _extract_props_from_bookmakers(
         for market in markets:
             if not isinstance(market, Mapping):
                 continue
-            market_key = str(market.get("key") or "").strip().lower()
+            market_key = canonicalize_market_key(str(market.get("key") or ""), log_unknown=False)
             if not market_key or market_key in _SKIP_MAINLINE_MARKETS:
                 continue
             if canonical_markets and market_key not in canonical_markets:
@@ -1105,7 +1107,9 @@ def _extract_direct_props(
             continue
         try:
             player_name = str(item.get("player_name") or item.get("playerName") or "").strip()
-            market_key = str(item.get("market_key") or item.get("marketKey") or "").strip().lower()
+            market_key = canonicalize_market_key(
+                str(item.get("market_key") or item.get("marketKey") or "")
+            )
             if not player_name or not market_key:
                 raise ValueError("Missing player_name or market_key.")
 

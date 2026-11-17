@@ -13,6 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from parlaypal_worker.config import WorkerSettings
+from parlaypal_worker.market_keys import canonicalize_market_key
 from parlaypal_worker.moneyline import MoneyLineClient, MoneyLineDeferred
 from parlaypal_worker.redis_client import RedisLike
 
@@ -174,7 +175,8 @@ def resolve_game_logs(
     use_moneyline = _uses_moneyline(settings)
     moneyline: MoneyLineClient | None = None
     try:
-        for sport_key, player_name, market_key in targets:
+        for sport_key, player_name, raw_market_key in targets:
+            market_key = canonicalize_market_key(raw_market_key)
             target = (sport_key, player_name, market_key)
             if not player_name.strip() or market_key in SKIPPED_MARKET_KEYS or target in seen:
                 continue
