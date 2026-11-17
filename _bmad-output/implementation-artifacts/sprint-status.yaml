@@ -80,7 +80,7 @@ development_status:
   epic-7: in-progress
   7-1-honest-empty-state-feed-diagnostics: done
   7-2-remove-fabricated-guarded_ev-default: done
-  7-3-canonical-prop-market-keys: backlog
+  7-3-canonical-prop-market-keys: review
   7-4-developer-loop-chores: backlog
   epic-7-retrospective: optional
 

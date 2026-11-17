@@ -21,6 +21,7 @@ from urllib.parse import quote
 import httpx
 
 from parlaypal_worker.config import WorkerSettings
+from parlaypal_worker.market_keys import canonicalize_market_key
 from parlaypal_worker.redis_client import RedisLike
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,7 @@ class MoneyLineClient:
 
         Raises MoneyLineDeferred to postpone and MoneyLineError for a real failure.
         """
+        market_key = canonicalize_market_key(market_key)
         league = LEAGUE_BY_SPORT.get(sport_key)
         if league is None or (sport_key, market_key) not in STAT_PATHS:
             return []
