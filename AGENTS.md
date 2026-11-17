@@ -12,6 +12,10 @@ ParlayPal is a high-conviction sports betting intelligence platform built on a p
 - **Backing Services**:
   - **PostgreSQL 16**: Relational persistence for durable entities (`teams`, `events`, `player_props`, `user_bets`).
   - **Redis 7.2**: Ephemeral hot odds cache (`odds:latest:{sport_key}:{event_id}`) with strict 45-second TTL, devigged EV feed cache (`ev:feed:{sport_key}`), and Pub/Sub bus (`odds:feed:{sport_key}`).
+    - MoneyLine game-log provider keys (worker only, not live odds, so the 45s TTL does not apply):
+      - `ml:roster:{league}:{page}`: roster pages, TTL `moneyline_roster_ttl_seconds` (7 days).
+      - `ml:gamelog:{league}:{player_id}`: per-player game log, TTL `moneyline_log_ttl_seconds` (20 hours; the vendor refreshes stats daily).
+      - `ml:rl:{epoch_minute}`: per-minute request counter for `moneyline_requests_per_minute`, TTL 70 seconds.
 
 ---
 
@@ -30,6 +34,12 @@ ParlayPal is a high-conviction sports betting intelligence platform built on a p
   # Or stage all working tree changes:
   python _bmad/scripts/git_flow.py ship -m "feat(scope): short summary" --all
   ```
+- Commit without pushing (a checkpoint commit, or when the human has not asked for a push yet):
+  ```bash
+  python _bmad/scripts/git_flow.py commit -m "feat(scope): short summary" --files path/a path/b
+  # Or: python _bmad/scripts/git_flow.py commit -m "..." --all
+  ```
+  Use `commit` instead of `ship` whenever the work must stay local; it blocks `main`/`master` like `ship` and never touches the remote.
 - Sync local `main` and prune stale remote branches after a PR merges:
   ```bash
   python _bmad/scripts/git_flow.py sync

@@ -66,5 +66,5 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
   summary: Stop defaulting a missing `guarded_ev` to `Decimal("0.0200")` on the persisted `PresetLeg`.
   evidence: `presets.py` sets `guarded_ev=prop.guarded_ev or Decimal("0.0200")`, a fabricated EV that feeds the preset score and display (the rationale already avoids it).
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-game-log-ingestion-for-upstream-players.md`
-  summary: Choose and wire a real player game-log source (parlay-api is odds-only), then enable the 6.5 fetcher; decide how to handle `player_anytime_td` history.
+  summary: RESOLVED by story 6-7 (MoneyLine adapter): Choose and wire a real player game-log source (parlay-api is odds-only), then enable the 6.5 fetcher; decide how to handle `player_anytime_td` history.
   evidence: parlay-api.com docs list no game-log, box-score or results endpoint; 6.5 ships a config-driven, disabled-by-default fetcher so live upstream props stay "Limited history" until a source is configured.

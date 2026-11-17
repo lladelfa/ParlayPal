@@ -168,6 +168,7 @@ class MoneyLineClient:
         self._rosters: dict[str, dict[str, set[str]]] = {}
         self._incomplete_rosters: set[str] = set()
         self.http_calls = 0
+        self.credits_remaining: int | None = None  # last x-credits-remaining this cycle
         self.unmatched = 0
         self.ambiguous = 0
 
@@ -253,10 +254,12 @@ class MoneyLineClient:
         if raw is None:
             return
         try:
-            if int(raw) <= 0:
-                self._blocked = True
+            remaining = int(raw)
         except ValueError:
             return
+        self.credits_remaining = remaining
+        if remaining <= 0:
+            self._blocked = True
 
     # ---- Redis JSON helpers (never raise) ----
 
@@ -395,7 +398,12 @@ class MoneyLineClient:
         return series
 
     def summary(self) -> str:
+        credits = (
+            f"{self.credits_remaining} credits remaining"
+            if self.credits_remaining is not None
+            else "credits remaining unknown"
+        )
         return (
-            f"{self.http_calls} MoneyLine calls, {self.unmatched} unmatched, "
+            f"{self.http_calls} MoneyLine calls, {credits}, {self.unmatched} unmatched, "
             f"{self.ambiguous} ambiguous"
         )

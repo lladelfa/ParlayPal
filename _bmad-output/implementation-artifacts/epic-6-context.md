@@ -14,6 +14,7 @@ A 2026-11-15 UI review showed every preset leg with the same hit-rate badge, for
 - Story 6.4: Evidence-based conviction rationale
 - Story 6.5: Game-log ingestion for upstream players
 - Story 6.6: Preset candidate quality gate and de-duplication
+- Story 6.7: MoneyLine game-log provider adapter (NBA & NFL)
 
 ## Requirements & Constraints
 

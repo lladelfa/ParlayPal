@@ -626,6 +626,38 @@ def test_credits_exhausted_header_stops_the_cycle() -> None:
     assert len(ml.calls) == 1  # first response reported no credits left; no further calls
 
 
+def test_summary_reports_credit_balance_and_call_count(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ml = MockML(NBA_ROSTER, {"nba-p-1": _twenty()}, credits_remaining="742")
+    targets = [(NBA, "Jayson Tatum", "player_points")]
+    with caplog.at_level("INFO"), ml.client() as http:
+        resolve_game_logs(
+            targets, settings=_settings(), redis_client=FakeRedisClient(), http_client=http
+        )
+    cycle_logs = [r for r in caplog.records if "MoneyLine game-log cycle" in r.getMessage()]
+    assert len(cycle_logs) == 1
+    assert cycle_logs[0].levelname == "INFO"
+    message = cycle_logs[0].getMessage()
+    assert f"{len(ml.calls)} MoneyLine calls" in message
+    assert "742 credits remaining" in message
+
+
+def test_summary_reports_unknown_credits_when_header_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ml = MockML(NBA_ROSTER, {"nba-p-1": _twenty()})
+    targets = [(NBA, "Jayson Tatum", "player_points")]
+    with caplog.at_level("INFO"), ml.client() as http:
+        resolve_game_logs(
+            targets, settings=_settings(), redis_client=FakeRedisClient(), http_client=http
+        )
+    message = next(
+        r.getMessage() for r in caplog.records if "MoneyLine game-log cycle" in r.getMessage()
+    )
+    assert "credits remaining unknown" in message
+
+
 def test_incomplete_roster_defers_targets_and_completes_over_later_cycles() -> None:
     roster = {"nba": [_player(f"nba-p-{i}", f"Filler Player{i}") for i in range(10, 16)]}
     roster["nba"].append(_player("nba-p-1", "Jayson Tatum"))  # lands on page 4 with page_size=2
