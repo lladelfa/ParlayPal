@@ -31,7 +31,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 
 generated: 11-08-2026 23:05
-last_updated: 11-16-2026 15:00
+last_updated: 11-16-2026 16:20
 project: ParlayPal
 project_key: NOKEY
 tracking_system: file-system
@@ -67,14 +67,74 @@ development_status:
   5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration: done
   epic-5-retrospective: optional
 
-  epic-6: in-progress
+  epic-6: done
   6-1-remove-fabricated-hit-rate-fallback-honest-consistency-badge: done
   6-2-selection-aware-hit-rate-for-under-legs: done
   6-3-real-recent-form-dots-from-game-logs: done
   6-4-evidence-based-conviction-rationale: done
   6-5-game-log-ingestion-for-upstream-players: done
   6-6-preset-candidate-quality-gate-dedup: done
-  6-7-moneyline-game-log-provider-adapter: review
-  epic-6-retrospective: optional
+  6-7-moneyline-game-log-provider-adapter: done
+  epic-6-retrospective: done
 
-action_items: []
+action_items:
+  - id: "epic-6-retro-item-1-fix-the-schema-upgrade-check-so-_ensure_"
+    epic: 6
+    action: "Fix the schema upgrade check so _ensure_schema_initialized also detects
+      missing columns (recent_outcomes), with a Postgres-backed or mocked upgrade
+      test"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-2-document-local-startup-compose-project-n"
+    epic: 6
+    action: "Document local startup: compose project name and container names, Windows
+      celery --pool=solo, required env keys including GAME_LOG_PROVIDER and MONEYLINE_REQUESTS_PER_MINUTE"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-3-reconcile-planning-artifacts-add-6-7-to"
+    epic: 6
+    action: "Reconcile planning artifacts: add 6.7 to epic-6-context.md, update the
+      Carson Beck note in epics.md, mark the 6.5 game-log source entry resolved in
+      deferred-work.md"
+    owner: "human"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-4-verify-epic-6-outcome-in-the-running-app"
+    epic: 6
+    action: "Verify Epic 6 outcome in the running app with GAME_LOG_PROVIDER=moneyline:
+      real hit rates, form dots and rationale on NBA and NFL cards, and no pre-6.1
+      values from the presets Redis snapshot"
+    owner: "human with dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-5-log-moneyline-x-credits-remaining-in-the"
+    epic: 6
+    action: "Log MoneyLine x-credits-remaining in the game-log cycle summary and watch
+      the credit balance during the first week"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-6-schedule-a-story-to-remove-the-fabricate"
+    epic: 6
+    action: "Schedule a story to remove the fabricated guarded_ev default Decimal
+      0.0200 in presets.py"
+    owner: "human"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-7-add-a-commit-only-subcommand-to-git_flow"
+    epic: 6
+    action: "Add a commit-only subcommand to git_flow.py and align AGENTS.md with
+      the no-auto-push workflow rule"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
+  - id: "epic-6-retro-item-8-process-hygiene-fetch-before-creating-wo"
+    epic: 6
+    action: "Process hygiene: fetch before creating worktrees, update sprint-status.yaml
+      only on main during the accept chore, decide a standing subagent permission
+      for bmad-build review layers"
+    owner: "human"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md"
