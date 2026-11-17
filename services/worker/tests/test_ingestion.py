@@ -907,19 +907,40 @@ def test_upsert_slate_to_db_updates_existing_prop_odds_in_place(
 
 
 def test_celery_sync_live_slate_task_registration_and_beat_schedule() -> None:
-    """Verify parlaypal_worker.sync_live_slate is registered on a 30.0s Beat interval with expiry."""
+    from parlaypal_worker.config import get_settings
+
+    """sync_live_slate is registered on the configurable (default 30 min) Beat interval."""
     assert "parlaypal_worker.sync_live_slate" in celery_app.tasks
 
     beat_schedule = celery_app.conf.beat_schedule
-    assert "sync-live-slate-every-30s" in beat_schedule
-    entry = beat_schedule["sync-live-slate-every-30s"]
+    assert "sync-live-slate" in beat_schedule
+    entry = beat_schedule["sync-live-slate"]
     assert entry["task"] == "parlaypal_worker.sync_live_slate"
-    assert entry["schedule"] == 30.0
-    assert entry["options"]["expires"] == 25.0
+    interval = get_settings().live_slate_poll_interval_seconds
+    assert entry["schedule"] == interval
+    assert entry["options"]["expires"] == interval * 0.9
 
     # Existing CLV schedule remains intact
     assert "stamp-closing-line-value-every-minute" in beat_schedule
     assert beat_schedule["stamp-closing-line-value-every-minute"]["schedule"] == 60.0
+
+
+def test_build_beat_schedule_uses_configured_interval() -> None:
+    from parlaypal_worker.celery_app import build_beat_schedule
+
+    entry = build_beat_schedule(live_slate_interval_seconds=600.0)["sync-live-slate"]
+    assert entry["schedule"] == 600.0
+    assert entry["options"]["expires"] == 540.0
+
+
+def test_live_slate_poll_interval_has_credit_safe_floor() -> None:
+    from pydantic import ValidationError
+
+    from parlaypal_worker.config import WorkerSettings
+
+    assert WorkerSettings().live_slate_poll_interval_seconds >= 60
+    with pytest.raises(ValidationError):
+        WorkerSettings(live_slate_poll_interval_seconds=30)
 
 
 def test_celery_sync_live_slate_task_execution_and_resource_cleanup(

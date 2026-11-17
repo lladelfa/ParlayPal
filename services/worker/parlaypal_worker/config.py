@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,10 @@ class WorkerSettings(BaseSettings):
     parlay_api_key: str = ""
     parlay_api_base_url: str = "https://api.parlay-api.com/v1"
     hot_cache_ttl_seconds: int = 45
+    # parlay-api.com bills credits per request (about 6 per cycle for NFL+NBA player props):
+    # Free = 1,000/mo, Starter = 20,000/mo. 1800s (30 min) is about 8,600 credits/mo. The 60s
+    # floor stops a typo from burning a month of credits in hours.
+    live_slate_poll_interval_seconds: float = Field(default=1800.0, ge=60.0)
     # Player game-log source (Story 6.5). Disabled unless base URL and path template are set.
     # parlay-api.com has no game-log endpoint, so nothing here points at a real provider.
     game_log_base_url: str = ""
