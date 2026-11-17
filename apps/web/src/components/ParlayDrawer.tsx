@@ -98,7 +98,7 @@ export function ParlayDrawer() {
         teamAbbreviation: leg.teamAbbreviation,
         marketKey: leg.marketKey,
         offeredAmericanOdds: leg.offeredAmericanOdds,
-        guardedEv: leg.guardedEv,
+        guardedEv: leg.guardedEv ?? undefined,
       }));
 
       const parsedDecimalOdds = parseFloat(slip.combinedDecimalOdds);

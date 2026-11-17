@@ -122,6 +122,18 @@ describe("presets lib unit tests", () => {
       expect(String(missing!.cards[0].legs[0].hitRateDisplay)).not.toBe("undefined");
     });
 
+    it("keeps a null/missing guarded EV as null, never a default", () => {
+      const nul = normalizeCuratedPresetFeed(feedWith({ guarded_ev: null }));
+      expect(nul!.cards[0].legs[0].guardedEv).toBeNull();
+      const missing = normalizeCuratedPresetFeed(feedWith({ guardedEv: undefined }));
+      expect(missing!.cards[0].legs[0].guardedEv).toBeNull();
+    });
+
+    it("preserves a real zero guarded EV", () => {
+      const feed = normalizeCuratedPresetFeed(feedWith({ guarded_ev: "0.0000" }));
+      expect(feed!.cards[0].legs[0].guardedEv).toBe("0.0000");
+    });
+
     it("preserves real hit-rate display strings", () => {
       const feed = normalizeCuratedPresetFeed(
         feedWith({ hit_rate_display: "0/10 (0.0%) L10", hit_rate_l10: "0.0000" }),
