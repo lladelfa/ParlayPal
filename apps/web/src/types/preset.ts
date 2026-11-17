@@ -19,7 +19,7 @@ export interface PresetLeg {
   sharpDecimalOdds?: string | null;
   sharpAmericanOdds?: number | null;
   fairProbability: string;
-  guardedEv: string;
+  guardedEv: string | null;
   hitRateL5?: string | null;
   hitRateL10?: string | null;
   hitRateSeason?: string | null;

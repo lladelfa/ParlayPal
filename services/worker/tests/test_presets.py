@@ -1249,3 +1249,35 @@ def test_generation_logs_drop_reasons(caplog: pytest.LogCaptureFixture) -> None:
     assert "below_min_fair_probability=1" in summary[0]
     assert "candidates=3" in summary[0]
     assert "cards=0" in summary[0]
+
+
+def test_missing_guarded_ev_stays_none_and_sorts_last() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 4)
+    props[0].guarded_ev = None
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now))
+    assert legs
+    for leg in legs:
+        if leg.player_name == "Player 0":
+            assert leg.guarded_ev is None
+        else:
+            assert leg.guarded_ev == Decimal("0.0545")
+    assert all(leg.guarded_ev != Decimal("0.0200") for leg in legs)
+
+
+def test_zero_guarded_ev_is_preserved() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3)
+    for prop in props:
+        prop.guarded_ev = Decimal("0")
+    legs = _all_legs(generate_curated_presets(props, events, now_utc=now))
+    assert legs
+    assert all(leg.guarded_ev == Decimal("0") for leg in legs)
+
+
+def test_none_ev_leg_ranks_after_real_ev_legs() -> None:
+    props, events, now = _slate([Decimal("0.7")] * 3)
+    props[0].guarded_ev = None
+    props[1].guarded_ev = Decimal("-0.0100")
+    props[2].guarded_ev = Decimal("0.0300")
+    feed = generate_curated_presets(props, events, now_utc=now)
+    order = [leg.player_name for leg in feed.cards[0].legs]
+    assert order == ["Player 2", "Player 1", "Player 0"]

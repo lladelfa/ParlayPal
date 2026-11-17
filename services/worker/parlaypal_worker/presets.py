@@ -227,7 +227,7 @@ class PresetLeg(BaseModel):
     sharp_decimal_odds: Decimal | None = None
     sharp_american_odds: int | None = None
     fair_probability: Decimal
-    guarded_ev: Decimal
+    guarded_ev: Decimal | None = None
     hit_rate_l5: Decimal | None = None
     hit_rate_l10: Decimal | None = None
     hit_rate_season: Decimal | None = None
@@ -480,10 +480,11 @@ def generate_curated_presets(
 
         clean_candidates.append((prop, event))
 
-    # Sort clean candidates by descending guarded EV and hit rate
+    # Sort by descending guarded EV (legs with no EV last) and hit rate
     clean_candidates.sort(
         key=lambda item: (
-            item[0].guarded_ev or Decimal("0.0"),
+            item[0].guarded_ev is not None,
+            item[0].guarded_ev if item[0].guarded_ev is not None else Decimal("0"),
             item[0].hit_rate_l10 if item[0].hit_rate_l10 is not None else Decimal("-1"),
         ),
         reverse=True,
@@ -563,7 +564,7 @@ def generate_curated_presets(
             if prop.sharp_decimal_odds
             else None,
             fair_probability=prop.fair_probability,
-            guarded_ev=prop.guarded_ev or Decimal("0.0200"),
+            guarded_ev=prop.guarded_ev,
             hit_rate_l5=prop.hit_rate_l5,
             hit_rate_l10=prop.hit_rate_l10,
             hit_rate_season=prop.hit_rate_season,

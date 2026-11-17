@@ -104,7 +104,7 @@ function normalizePresetLeg(raw: unknown): PresetLeg | null {
       pickField(obj, "fairProbability", "fair_probability"),
       "0.5000",
     ),
-    guardedEv: coerceString(pickField(obj, "guardedEv", "guarded_ev"), "0.0000"),
+    guardedEv: coerceNullableString(pickField(obj, "guardedEv", "guarded_ev")),
     hitRateL5: coerceNullableString(pickField(obj, "hitRateL5", "hit_rate_l5")),
     hitRateL10: coerceNullableString(pickField(obj, "hitRateL10", "hit_rate_l10")),
     hitRateSeason: coerceNullableString(
