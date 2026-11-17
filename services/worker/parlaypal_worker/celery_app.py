@@ -28,6 +28,22 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+
+def build_beat_schedule(live_slate_interval_seconds: float) -> dict[str, dict[str, Any]]:
+    """Beat schedule; the live-slate poll interval is configurable to protect API credits."""
+    return {
+        "sync-live-slate": {
+            "task": "parlaypal_worker.sync_live_slate",
+            "schedule": live_slate_interval_seconds,
+            "options": {"expires": live_slate_interval_seconds * 0.9},
+        },
+        "stamp-closing-line-value-every-minute": {
+            "task": "parlaypal_worker.stamp_closing_line_value",
+            "schedule": 60.0,
+        },
+    }
+
+
 celery_app = Celery(
     "parlaypal_worker",
     broker=settings.redis_url,
@@ -41,17 +57,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    beat_schedule={
-        "sync-live-slate-every-30s": {
-            "task": "parlaypal_worker.sync_live_slate",
-            "schedule": 30.0,
-            "options": {"expires": 25.0},
-        },
-        "stamp-closing-line-value-every-minute": {
-            "task": "parlaypal_worker.stamp_closing_line_value",
-            "schedule": 60.0,
-        },
-    },
+    beat_schedule=build_beat_schedule(settings.live_slate_poll_interval_seconds),
 )
 
 
