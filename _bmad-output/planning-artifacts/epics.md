@@ -36,6 +36,9 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-12: Seamless Bet Logging & Auto-Staging** — Users can save any parlay in their Parlay Drawer with 1 tap, and triggering a QuickPick handoff automatically stages the bet into the user's pending ledger with non-intrusive confirmation.
 - **FR-13: Asynchronous CLV Stamping** — Query closing sharp odds 10 minutes post-commence time for every leg in a tracked bet, calculate CLV% against execution odds, and stamp the result onto the bet record.
 - **FR-14: Automated Upstream Schedule, Prop Ingestion & Beat Orchestration** — Periodically poll upstream NFL and NBA game schedules, teams, and two-way player prop odds (with a deterministic local seed fallback when offline/unconfigured), upsert into PostgreSQL 16, and execute a 30-second Celery Beat schedule so the 45-second Redis hot caches (`markets:browser:*`, `presets:feed:*`, `ev:feed:*`) and SSE stream stay continuously updated.
+- **FR-15: Truthful Consistency & Conviction Data** — Consistency badges, form dots and rationale are computed from real game logs and the leg's actual side and price; missing evidence is labelled, never fabricated.
+- **FR-16: Trustworthy Live Feed** — When live data is unavailable or yields no qualifying presets, the app says so explicitly instead of showing sample legs; no persisted or scored value is a fabricated default; prop market keys are canonical across providers.
+- **FR-17: Game-Centric Browsing** — Users browse a slate of games showing main lines (spread, moneyline, total), select a game to filter props or open a game detail view (main lines, props by market, player history), sort the market browser by any displayed field, and read an in-app explanation of how the site and its score work.
 
 ### NonFunctional Requirements
 
@@ -80,6 +83,8 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-13:** Epic 4 — Asynchronous CLV Stamping
 - **FR-14:** Epic 5 — Automated Upstream Schedule, Prop Ingestion & Beat Orchestration
 - **FR-15:** Epic 6 — Truthful Consistency & Conviction Data
+- **FR-16:** Epic 7 — Trustworthy Live Feed
+- **FR-17:** Epic 8 — Game-Centric Browsing
 
 ## Epic List
 
@@ -106,6 +111,14 @@ Bettors and local developers see continuously updated, current NFL and NBA game 
 ### Epic 6: Preset Data Integrity & Truthful Conviction Copy
 Bettors can trust every consistency badge, form indicator and rationale on a preset card because each is computed from real player game logs and the leg's actual side (Over/Under) and price. Cards never show fabricated defaults, and legs lacking evidence are labelled honestly or excluded.
 **FRs covered:** FR-15
+
+### Epic 7: Trustworthy Feed & Data Hygiene
+Bettors and the developer can tell at a glance whether the feed is live. An empty or failed feed shows an honest "no live data" state with a logged reason rather than invented sample legs, no scored value is a fabricated default, prop markets use one canonical key per market, and the local-dev loop (credits visibility, planning docs, commit-only git flow) is tidy. Prerequisite for Epic 8.
+**FRs covered:** FR-16
+
+### Epic 8: Game-Centric Browsing & Explainability
+Bettors browse a Fanatics-style slate of games with main lines (spread, moneyline, total), click a game to filter props or open a game page (main lines, props by market tab, player history), sort the market browser by score, player, team and more, and learn how the site and its score work from an About page.
+**FRs covered:** FR-17
 
 
 ## Epic 1: Curated Preset Parlays & Value Feed
@@ -440,3 +453,154 @@ So that consistency data exists for the players on today's slate.
 **And** players that cannot be matched, or have fewer than 5 games, stay `NULL` ("Limited history").
 
 **Task 1 (gate):** coverage, ordering and NBA/NFL fields were verified on the free tier (see spec Implementation Notes); remaining checks are the NFL passing-yards field, DNP handling, and name-match rate (target >= 90%) using parlay-api prop names. If the match rate fails, stop and keep the 6.5 fetcher disabled.
+
+## Epic 7: Trustworthy Feed & Data Hygiene
+
+Triggered by the Epic 6 retrospective (`_bmad-output/implementation-artifacts/epic-6-retro-2026-11-16.md`) and a 2026-11-17 review where the preset feed showed "Sample fixture leg shown while the live feed is unavailable" and "Limited history" for players expected to have history. Diagnosis: the live Redis feed held 0 cards (only 26 of 4,529 active props had a `hit_rate_l10`, and `GAME_LOG_PROVIDER` was unset in `services/worker/.env`), so `apps/web/src/lib/presets.ts` (~line 564-574) served the hard-coded `FALLBACK_PRESET_FEED`. Retro action item 1 (schema upgrade for old databases) is out of scope: ParlayPal has a single developer and no other databases.
+
+### Story 7.1: Honest Empty State & Feed Diagnostics
+
+As a bettor,
+I want the app to say when there is no live preset data instead of showing sample legs,
+So that I never mistake a fixture for a real recommendation.
+
+**Acceptance Criteria:**
+
+**Given** the live preset feed is empty, expired or Redis is unreachable,
+**When** the web app renders presets,
+**Then** `FALLBACK_PRESET_FEED` is no longer served as if real; the UI shows an explicit "No live presets right now" state that distinguishes "feed unavailable" from "no qualifying presets" (the response carries a reason),
+**And** the sample fixtures remain available only behind an explicit dev flag and are visibly labelled "Sample data" when used,
+**And** `generate_curated_presets` logs, per cycle, how many candidates were dropped and why (no hit rate, quality gate, dedup, below minimum legs) so an empty feed is diagnosable from the worker log.
+
+**Task 1 (verify):** with `GAME_LOG_PROVIDER=moneyline` set, run the stack and record how many props gain real hit rates per beat cycle (the free plan allows 10 requests/min, so fill is gradual) and whether cards then appear; confirm the 24-hour `presets:feed:snapshot:*` does not serve pre-6.1 values. Findings go in the story's spec.
+
+**Edge cases:** the market browser and drawer must also stop mixing fixture legs into live data; `LegSwapperModal`, `MarketBrowser`, `ParlayDrawer` and `PresetCard` share the "Limited history" copy and must keep working with the new state.
+
+### Story 7.2: Remove Fabricated `guarded_ev` Default
+
+As a bettor,
+I want a missing edge estimate to stay missing,
+So that no preset score or display includes an invented 2% EV.
+
+**Acceptance Criteria:**
+
+**Given** a prop whose `guarded_ev` is `NULL`,
+**When** `presets.py` builds its `PresetLeg`,
+**Then** no `Decimal("0.0200")` (or any default) is substituted, `guarded_ev` stays `None`, and the leg is either excluded from EV-dependent scoring or the score is computed only from legs with real EV (decision recorded in the spec),
+**And** the web display renders a missing EV as absent, never as 0.00% or 2.00%,
+**And** a real `guarded_ev` of exactly `0` is preserved (explicit `is None` check, not `or`).
+
+### Story 7.3: Canonical Prop Market Keys
+
+As a bettor,
+I want one market to appear once,
+So that filters, sorting and consistency data are not split across spelling variants.
+
+**Acceptance Criteria:**
+
+**Given** the database holds `player_threes` (1,049 rows) alongside `player_threes_made` (83), and `player_rush_yds` / `player_rushing_yards` / `player_rush_yards` and `player_pass_yds` / `player_passing_yards` variants,
+**When** props are ingested,
+**Then** every provider spelling is mapped to one canonical `market_key` at the ingestion boundary, with the mapping table in one place and unit-tested,
+**And** hit-rate computation, the MoneyLine game-log stat mapping and the web market filters all use the canonical keys,
+**And** an unknown market key is stored as received and logged once, not silently dropped.
+
+**Edge cases:** existing rows are rewritten by a one-off local script (no migration framework needed); anytime-TD stays `player_anytime_td`.
+
+### Story 7.4: Developer-Loop Chores
+
+As the developer,
+I want the remaining Epic 6 follow-ups closed,
+So that the next epics start from accurate docs and visible provider limits.
+
+**Acceptance Criteria:**
+
+**Given** the Epic 6 retro action items 3, 5 and 7 and the open `deferred-work.md` entries,
+**When** this story ships,
+**Then** MoneyLine `x-credits-remaining` and the per-cycle request count are logged at INFO each beat cycle,
+**And** `epic-6-context.md` lists story 6.7, the Carson Beck note in `epics.md` (Story 6.6) is replaced by the decision recorded in spec 6-6, and the `deferred-work.md` entry "Choose and wire a real player game-log source" is marked resolved by 6-7,
+**And** `git_flow.py` gains a commit-only subcommand (no push) and `AGENTS.md` says when to use it,
+**And** `AGENTS.md` lists the `ml:roster:*`, `ml:gamelog:*`, `ml:rl:*` Redis key families and their TTLs.
+
+## Epic 8: Game-Centric Browsing & Explainability
+
+Inspired by Fanatics Sportsbook (screenshots reviewed 2026-11-17): a slate where each game shows its main lines, a game page with main lines then props by market tab, and a deeper game-lines section. Scope here is the first two levels; per-period lines (halves, quarters) and multi-rung player ladders are out of scope. Today the worker stores only player props (`player_props`); spread, moneyline and total are not ingested, so Story 8.1 is a data story and gates 8.2 and 8.3. Story 8.4 (sorting) and Story 8.5 (About) do not depend on game lines and may run in parallel after Epic 7.
+
+### Story 8.1: Game Lines Ingestion (Spread, Moneyline, Total)
+
+As a bettor,
+I want the app to know each game's spread, moneyline and total,
+So that games can be shown with their main lines.
+
+**Acceptance Criteria:**
+
+**Given** the upstream provider returns `h2h`, `spreads` and `totals` markets for NFL and NBA events,
+**When** the schedule/odds sync runs,
+**Then** the main line for each is stored per event (consensus line plus per-book prices where available) in PostgreSQL with `TIMESTAMPTZ` timestamps and cached in Redis with the same 45-second TTL as other live odds,
+**And** odds follow the Decimal invariant (stored as decimal, American only at display),
+**And** an event without lines is stored without them, never with defaults.
+
+**Task 1 (gate):** confirm from a live response that parlay-api returns these markets for NFL and NBA and at what credit cost per event; if it does not, stop and re-plan 8.2 and 8.3 around prop-only data.
+
+### Story 8.2: Slate of Games With Main Lines & Click-to-Filter
+
+As a bettor,
+I want to see each upcoming game with its spread, moneyline and total and click one to see only its props,
+So that I can browse the slate the way I do in my sportsbook.
+
+**Acceptance Criteria:**
+
+**Given** the Schedule & Market Browsing section,
+**When** it loads,
+**Then** each game shows away and home team, start time and a Spread / Money / Total grid (two rows, away over home) from Story 8.1, with missing lines shown as "—",
+**And** clicking a game selects it (visibly highlighted) and filters the player-prop list below to that event; clicking it again, or a "Clear" control, removes the filter, and the existing sport and date filters still apply,
+**And** the selection is reflected in the URL (for example `?game=<event_id>`) so a refresh or shared link keeps it, and the layout works at mobile width.
+
+**Edge cases:** a game with no props shows an empty state, not the previous list; selection survives the 30-second data refresh without flicker.
+
+### Story 8.3: Game Detail Page
+
+As a bettor,
+I want a page for one game with all its lines and its players' history,
+So that I can judge a game's props in context.
+
+**Acceptance Criteria:**
+
+**Given** the slate from Story 8.2,
+**When** I open a game,
+**Then** `/games/<event_id>` shows the header (teams, start time), a Main Lines block, and a Player Props section with market tabs (for example Points, Threes, Rebounds for NBA; Pass Yds, Rush Yds, Anytime TD for NFL) listing each player's line, Over/Under prices, hit rate and form dots,
+**And** expanding a player shows their recent game log (most recent first) from the existing game-log cache, or "Limited history" when none exists,
+**And** the page offers the existing parlay-drawer add-to-slip action on each prop and works at mobile width,
+**And** an unknown or past `event_id` shows a not-found state.
+
+**Out of scope:** per-period lines, multi-rung player ladders, live scores, head-to-head history.
+
+### Story 8.4: Sortable Market Browser
+
+As a bettor,
+I want to sort the prop list by score, player, team and other fields,
+So that I can find the best or most relevant props quickly.
+
+**Acceptance Criteria:**
+
+**Given** the market browser list,
+**When** I click a column header or choose a sort option,
+**Then** rows sort ascending or descending by player, team, market, line, odds, EV, hit rate and score, with an indicator of the active sort and direction,
+**And** missing values (for example no hit rate) always sort last regardless of direction,
+**And** sorting composes with the sport, date, market and game filters, and the choice persists in the URL.
+
+### Story 8.5: About & How It Works
+
+As a new bettor,
+I want a clear explanation of the site and its score,
+So that I understand what the numbers mean before I act on them.
+
+**Acceptance Criteria:**
+
+**Given** the navigation,
+**When** I open About,
+**Then** `/about` walks through the site in sections: what ParlayPal is, the preset feed, the market browser and game pages, the parlay drawer and lineshopping, QuickPick handoff, bet tracking and CLV,
+**And** it explains the Hybrid Value Score in plain language (inputs, direction, how missing data is handled, what a high score does and does not mean), matching the implemented formula in `presets.py`,
+**And** it explains consistency hit rates (L5/L10/season, Over vs Under), the "Limited history" badge, EV and the 10% suspect-line guard, and states that it is not betting advice,
+**And** a short "What is this score?" link on preset cards and the market browser points to the relevant section.
+
+**Edge cases:** copy must be written from the code (score formula, thresholds) at implementation time, not from memory, so it cannot drift from behavior.
