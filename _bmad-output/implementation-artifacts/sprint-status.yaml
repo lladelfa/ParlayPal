@@ -31,7 +31,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 
 generated: 11-08-2026 23:05
-last_updated: 11-16-2026 16:20
+last_updated: 11-17-2026 17:00
 project: ParlayPal
 project_key: NOKEY
 tracking_system: file-system
@@ -64,7 +64,7 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: done
-  5-1-automated-upstream-schedule-prop-ingestion-beat-orchestration: done
+  5-1-automated-upstream-schedule-prop-ingestion-beat-orchestratio: done
   epic-5-retrospective: optional
 
   epic-6: done
@@ -72,11 +72,25 @@ development_status:
   6-2-selection-aware-hit-rate-for-under-legs: done
   6-3-real-recent-form-dots-from-game-logs: done
   6-4-evidence-based-conviction-rationale: done
-  6-5-game-log-ingestion-for-upstream-players: done
-  6-6-preset-candidate-quality-gate-dedup: done
-  6-7-moneyline-game-log-provider-adapter: done
+  6-5-game-log-ingestion-for-upstream-non-seed-players: done
+  6-6-preset-candidate-quality-gate-de-duplication: done
+  6-7-moneyline-game-log-provider-adapter-nba-nfl: done
   epic-6-retrospective: done
 
+  epic-7: in-progress
+  7-1-honest-empty-state-feed-diagnostics: done
+  7-2-remove-fabricated-guarded_ev-default: done
+  7-3-canonical-prop-market-keys: backlog
+  7-4-developer-loop-chores: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-game-lines-ingestion-spread-moneyline-total: backlog
+  8-2-slate-of-games-with-main-lines-click-to-filter: backlog
+  8-3-game-detail-page: backlog
+  8-4-sortable-market-browser: backlog
+  8-5-about-how-it-works: backlog
+  epic-8-retrospective: optional
 action_items:
   - id: "epic-6-retro-item-1-fix-the-schema-upgrade-check-so-_ensure_"
     epic: 6
