@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { PresetCard as PresetCardType } from "@/types/preset";
+import type { PresetCard as PresetCardType, FeedReason } from "@/types/preset";
 import type { MarketBrowserFeed as MarketBrowserFeedType } from "@/types/market";
 import { ParlayDrawerProvider } from "@/context/ParlayDrawerContext";
 import { PresetFeed } from "@/components/PresetFeed";
@@ -13,11 +13,13 @@ import { getTrackedBets } from "@/lib/ledger";
 
 interface TerminalViewProps {
   initialPresets: PresetCardType[];
+  presetReason?: FeedReason;
   initialMarketFeed: MarketBrowserFeedType;
 }
 
 export function TerminalView({
   initialPresets,
+  presetReason,
   initialMarketFeed,
 }: TerminalViewProps) {
   const [activeTab, setActiveTab] = useState<"presets" | "browser" | "bets">("presets");
@@ -99,7 +101,7 @@ export function TerminalView({
 
           {/* Tab Content View */}
           {activeTab === "presets" ? (
-            <PresetFeed initialCards={initialPresets} />
+            <PresetFeed initialCards={initialPresets} reason={presetReason} />
           ) : activeTab === "browser" ? (
             <MarketBrowser initialFeed={initialMarketFeed} />
           ) : (

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import type { PresetCard as PresetCardType } from "@/types/preset";
+import type { PresetCard as PresetCardType, FeedReason } from "@/types/preset";
 import { recalculatePresetCard } from "@/lib/math";
 import { classifyDateWindow, presetLegToParlayLeg } from "@/lib/parlay";
 import { useParlayDrawer } from "@/context/ParlayDrawerContext";
@@ -9,9 +9,17 @@ import { PresetCard } from "./PresetCard";
 
 interface PresetFeedProps {
   initialCards: PresetCardType[];
+  reason?: FeedReason;
 }
 
-export function PresetFeed({ initialCards }: PresetFeedProps) {
+const EMPTY_STATE_COPY: Record<"no_qualifying_presets" | "feed_unavailable", string> = {
+  no_qualifying_presets:
+    "The feed is running, but no parlay currently meets the quality bar (real hit-rate history, fair value, distinct players).",
+  feed_unavailable:
+    "The live preset feed is unavailable (no data in cache). Check that the worker and Redis are running.",
+};
+
+export function PresetFeed({ initialCards, reason }: PresetFeedProps) {
   const [cards, setCards] = useState<PresetCardType[]>(initialCards);
   const [activeSportFilter, setActiveSportFilter] = useState<"all" | "nfl" | "nba">("all");
   const [sseConnected, setSseConnected] = useState(false);
@@ -164,6 +172,29 @@ export function PresetFeed({ initialCards }: PresetFeedProps) {
           )}
         </div>
       </div>
+
+      {reason === "sample" && (
+        <p
+          data-testid="sample-data-banner"
+          className="mb-4 rounded border border-border-hairline bg-surface-module px-3 py-2 text-xs font-semibold text-accent-cyan"
+        >
+          Sample data — fixture legs, not live recommendations.
+        </p>
+      )}
+
+      {cards.length === 0 && (
+        <div
+          data-testid="preset-empty-state"
+          className="mb-6 rounded-lg border border-border-hairline bg-surface-module px-4 py-6 text-center"
+        >
+          <p className="font-display text-base font-semibold text-text-primary">
+            No live presets right now
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            {EMPTY_STATE_COPY[reason === "no_qualifying_presets" ? reason : "feed_unavailable"]}
+          </p>
+        </div>
+      )}
 
       {/* Preset Cards Grid */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">

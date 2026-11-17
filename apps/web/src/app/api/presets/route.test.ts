@@ -28,10 +28,12 @@ class FakeRedisClient implements RedisClient {
 
 afterEach(() => {
   setRedisClientFactory(null);
+  delete process.env.PARLAYPAL_SAMPLE_DATA;
 });
 
 describe("GET /api/presets", () => {
-  it("returns 3 to 5 curated preset cards when Redis cache is empty (cold start fallback)", async () => {
+  it("returns 3 to 5 curated preset cards when Redis cache is empty (cold start sample fixtures behind dev flag)", async () => {
+    process.env.PARLAYPAL_SAMPLE_DATA = "1";
     const fakeClient = new FakeRedisClient();
     setRedisClientFactory(() => fakeClient);
 
@@ -153,7 +155,7 @@ describe("GET /api/presets", () => {
     expect(body.cards[0].legs[0].playerName).toBe("Derrick Henry");
   });
 
-  it("handles Redis connection errors gracefully by falling back to curated feed", async () => {
+  it("handles Redis connection errors gracefully with an honest empty feed", async () => {
     const fakeClient = new FakeRedisClient();
     fakeClient.shouldFail = true;
     setRedisClientFactory(() => fakeClient);
@@ -163,7 +165,8 @@ describe("GET /api/presets", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.cards.length).toBeGreaterThanOrEqual(3);
+    expect(body.cards).toEqual([]);
+    expect(body.reason).toBe("feed_unavailable");
   });
 
   it("normalizes snake_case worker payloads and falls back to presets:feed:snapshot:all", async () => {

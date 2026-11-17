@@ -22,10 +22,12 @@ class FakeRedisClient implements RedisClient {
 }
 
 beforeEach(() => {
+  process.env.PARLAYPAL_SAMPLE_DATA = "1";
   setRedisClientFactory(() => new FakeRedisClient());
 });
 
 afterEach(() => {
+  delete process.env.PARLAYPAL_SAMPLE_DATA;
   setRedisClientFactory(null);
 });
 

@@ -529,8 +529,23 @@ export const FALLBACK_PRESET_FEED: CuratedPresetFeed = {
   ],
 };
 
+export function sampleDataEnabled(): boolean {
+  const flag = (process.env.PARLAYPAL_SAMPLE_DATA ?? "").toLowerCase();
+  return flag === "1" || flag === "true";
+}
+
+function sampleFeed(sportKey?: string): CuratedPresetFeed {
+  const sport = sportKey?.toLowerCase();
+  const cards =
+    sport && (sport.includes("nfl") || sport.includes("nba"))
+      ? FALLBACK_PRESET_FEED.cards.filter((c) => sport.includes(c.sportKey))
+      : FALLBACK_PRESET_FEED.cards;
+  return { generatedAt: new Date().toISOString(), cards, reason: "sample" };
+}
+
 export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPresetFeed> {
   let redis: ReturnType<typeof createRedisClient> | null = null;
+  let reason: "no_qualifying_presets" | "feed_unavailable" = "feed_unavailable";
   try {
     redis = createRedisClient();
     if (typeof redis.connect === "function") {
@@ -543,11 +558,14 @@ export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPr
     if (cached) {
       const normalized = normalizeCuratedPresetFeed(JSON.parse(cached));
       if (normalized && normalized.cards.length > 0) {
-        return normalized;
+        return { ...normalized, reason: "live" };
+      }
+      if (normalized) {
+        reason = "no_qualifying_presets";
       }
     }
   } catch (err) {
-    console.warn(`Redis unavailable (${(err as Error).message}); utilizing fallback preset feed.`);
+    console.warn(`Preset feed unavailable (${(err as Error).message}).`);
   } finally {
     if (redis) {
       try {
@@ -558,18 +576,8 @@ export async function getCuratedPresetFeed(sportKey?: string): Promise<CuratedPr
     }
   }
 
-  if (sportKey && sportKey.toLowerCase().includes("nfl")) {
-    return {
-      generatedAt: new Date().toISOString(),
-      cards: FALLBACK_PRESET_FEED.cards.filter((c) => c.sportKey === "nfl"),
-    };
+  if (sampleDataEnabled()) {
+    return sampleFeed(sportKey);
   }
-  if (sportKey && sportKey.toLowerCase().includes("nba")) {
-    return {
-      generatedAt: new Date().toISOString(),
-      cards: FALLBACK_PRESET_FEED.cards.filter((c) => c.sportKey === "nba"),
-    };
-  }
-
-  return FALLBACK_PRESET_FEED;
+  return { generatedAt: new Date().toISOString(), cards: [], reason };
 }

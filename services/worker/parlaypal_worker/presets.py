@@ -405,6 +405,17 @@ def _distinct_players(pairs: list[tuple[PresetLeg, datetime]]) -> set[str]:
     return {_player_identity(p[0].player_name) for p in pairs}
 
 
+def _log_drop_summary(candidates: int, drops: dict[str, int], cards: int) -> None:
+    """Log one INFO line per generation cycle so an empty feed is diagnosable."""
+    detail = " ".join(f"{reason}={count}" for reason, count in sorted(drops.items())) or "none"
+    logger.info(
+        "Preset generation drops: candidates=%d cards=%d %s",
+        candidates,
+        cards,
+        detail,
+    )
+
+
 def generate_curated_presets(
     props: list[PlayerProp],
     events_map: dict[uuid.UUID, Event],
@@ -433,25 +444,38 @@ def generate_curated_presets(
     # - Game not commenced: event exists, status != "LIVE", commence_time > ref_time
     # - Fair probability and guarded EV present
     clean_candidates: list[tuple[PlayerProp, Event]] = []
+    drops: dict[str, int] = {}
+
+    def _drop(reason: str) -> None:
+        drops[reason] = drops.get(reason, 0) + 1
+
     for prop in props:
         if prop.status in ("SUSPECT_STALE_LINE", "SUSPENDED", "SETTLED"):
+            _drop("status")
             continue
         if prop.guarded_ev is not None and prop.guarded_ev > Decimal("0.1000"):
+            _drop("outlier_ev")
             continue
         if prop.fair_probability is None or prop.offered_decimal_odds < Decimal("1.01"):
+            _drop("missing_fair_probability")
             continue
         if prop.fair_probability < MIN_FAIR_PROBABILITY:
+            _drop("below_min_fair_probability")
             continue
 
         event = events_map.get(prop.event_id)
         if not event:
+            _drop("event_missing")
             continue
         if event.status in ("LIVE", "FINAL", "CANCELLED", "POSTPONED"):
+            _drop("event_not_open")
             continue
         if event.commence_time <= ref_time:
+            _drop("event_commenced")
             continue
         event_sport = "nfl" if "nfl" in event.sport_key.lower() else "nba"
         if not _is_plausible_market(prop.market_key, event_sport):
+            _drop("implausible_market")
             continue
 
         clean_candidates.append((prop, event))
@@ -568,6 +592,7 @@ def generate_curated_presets(
     # Assemble cards alternating sports or grouping
     all_legs = legs_by_sport["nfl"] + legs_by_sport["nba"]
     if not all_legs:
+        _log_drop_summary(len(props), drops, 0)
         return CuratedPresetFeed(generated_at=ref_time, cards=[])
 
     # Build up to 5 cards (min 3)
@@ -591,6 +616,7 @@ def generate_curated_presets(
             ]
 
         if len(_distinct_players(candidates)) < 2:
+            drops["theme_below_min_players"] = drops.get("theme_below_min_players", 0) + 1
             continue
 
         # Select 2 to 3 legs from distinct players, rotating to avoid identical cards
@@ -611,6 +637,7 @@ def generate_curated_presets(
         card_legs = [p[0] for p in selected_pairs]
         if not any(leg.hit_rate_l10 is not None for leg in card_legs):
             logger.info("Skipping preset %r: no leg has real hit-rate history", theme_title)
+            drops["theme_no_hit_rate"] = drops.get("theme_no_hit_rate", 0) + 1
             theme_idx += 1
             continue
         earliest_time = min(p[1] for p in selected_pairs)
@@ -630,6 +657,7 @@ def generate_curated_presets(
         if len(cards) >= max(3, min(5, target_count)):
             break
 
+    _log_drop_summary(len(props), drops, len(cards))
     return CuratedPresetFeed(generated_at=ref_time, cards=cards)
 
 

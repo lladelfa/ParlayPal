@@ -69,4 +69,6 @@ export interface MarketBrowserFeed {
   sportKey: string;
   props: MarketPropRow[];
   games: ScheduledEventSummary[];
+  /** "sample" when fixtures are served behind the dev flag. */
+  reason?: "live" | "feed_unavailable" | "sample";
 }
