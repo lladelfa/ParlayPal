@@ -31,7 +31,7 @@
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 
 generated: 11-08-2026 23:05
-last_updated: 11-17-2026 17:00
+last_updated: 11-18-2026 09:00
 project: ParlayPal
 project_key: NOKEY
 tracking_system: file-system
@@ -81,11 +81,11 @@ development_status:
   7-1-honest-empty-state-feed-diagnostics: done
   7-2-remove-fabricated-guarded_ev-default: done
   7-3-canonical-prop-market-keys: done
-  7-4-developer-loop-chores: review
+  7-4-developer-loop-chores: done
   epic-7-retrospective: optional
 
-  epic-8: backlog
-  8-1-game-lines-ingestion-spread-moneyline-total: backlog
+  epic-8: in-progress
+  8-1-game-lines-ingestion-spread-moneyline-total: review
   8-2-slate-of-games-with-main-lines-click-to-filter: backlog
   8-3-game-detail-page: backlog
   8-4-sortable-market-browser: backlog

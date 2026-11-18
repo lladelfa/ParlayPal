@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import unicodedata
@@ -36,7 +37,7 @@ from parlaypal_worker.market_browser import (
     sync_market_browser_to_redis,
 )
 from parlaypal_worker.market_keys import canonicalize_market_key
-from parlaypal_worker.models import Event, PlayerProp, Team
+from parlaypal_worker.models import Event, EventLine, PlayerProp, Team
 from parlaypal_worker.presets import generate_curated_presets, sync_preset_feed_to_redis
 from parlaypal_worker.redis_client import (
     HOT_CACHE_TTL_SECONDS,
@@ -47,6 +48,7 @@ from parlaypal_worker.redis_client import (
     _validate_provider_prefix,
     _validate_sport_key,
     format_iso8601_utc,
+    game_lines_key,
     get_redis_client,
     publish_odds_delta,
 )
@@ -2469,3 +2471,465 @@ def run_live_slate_sync(
             close_session_fn = getattr(active_session, "close", None)
             if callable(close_session_fn):
                 close_session_fn()
+
+
+# ---------------------------------------------------------------------------
+# Game lines (Story 8.1): consensus spread / moneyline / total per event
+# ---------------------------------------------------------------------------
+
+GAME_LINE_MARKETS: tuple[str, ...] = ("h2h", "spreads", "totals")
+_GAME_LINE_SIDES: dict[str, tuple[str, str]] = {
+    "h2h": ("home", "away"),
+    "spreads": ("home", "away"),
+    "totals": ("over", "under"),
+}
+_POINT_QUANTIZE: Decimal = Decimal("0.01")
+
+# (book key, point or None, decimal price)
+_GameLineEntry = tuple[str, Decimal | None, Decimal]
+
+
+class IngestedGameLine(BaseModel):
+    """One consensus side of a game market, with the per-book prices behind it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_external_id: str
+    sport_key: str
+    market_key: str
+    side: str
+    point: Decimal | None = None
+    decimal_odds: Decimal
+    book_prices: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GameLinesFetchResult(BaseModel):
+    """Outcome of one game-lines polling cycle."""
+
+    lines: list[IngestedGameLine] = Field(default_factory=list)
+    seen_event_external_ids: list[str] = Field(default_factory=list)
+    requests: int = 0
+    credits_remaining: int | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+def _median_low(values: Sequence[Decimal]) -> Decimal:
+    ordered = sorted(values)
+    return ordered[(len(ordered) - 1) // 2]
+
+
+def _game_line_side(
+    market_key: str, outcome_name: str, home_name: str, away_name: str
+) -> str | None:
+    name = outcome_name.strip().lower()
+    if market_key == "totals":
+        return name if name in ("over", "under") else None
+    if name and name == home_name:
+        return "home"
+    if name and name == away_name:
+        return "away"
+    return None
+
+
+def _reduce_game_lines(
+    raw_event: Mapping[str, Any],
+    *,
+    event_external_id: str,
+    sport_key: str,
+) -> list[IngestedGameLine]:
+    """Reduce an event's bookmakers into one consensus line per market side.
+
+    Consensus point: the best-priority sharp book that quoted the market, else the (low) median
+    across books. Consensus price: the best sharp book's price at the consensus point, else the
+    median price among books quoting that point. Missing data stays missing.
+    """
+    raw_bookmakers = raw_event.get("bookmakers")
+    if not isinstance(raw_bookmakers, Sequence) or isinstance(raw_bookmakers, (str, bytes)):
+        return []
+    home_name = str(raw_event.get("home_team") or "").strip().lower()
+    away_name = str(raw_event.get("away_team") or "").strip().lower()
+
+    entries: dict[tuple[str, str], dict[str, _GameLineEntry]] = {}
+    for book in raw_bookmakers:
+        if not isinstance(book, Mapping):
+            continue
+        book_key = str(book.get("key") or "").strip().lower()
+        markets = book.get("markets")
+        if not book_key or not isinstance(markets, Sequence) or isinstance(markets, (str, bytes)):
+            continue
+        for market in markets:
+            if not isinstance(market, Mapping):
+                continue
+            market_key = str(market.get("key") or "").strip().lower()
+            outcomes = market.get("outcomes")
+            if market_key not in GAME_LINE_MARKETS or not isinstance(outcomes, Sequence):
+                continue
+            if isinstance(outcomes, (str, bytes)):
+                continue
+            for outcome in outcomes:
+                if not isinstance(outcome, Mapping):
+                    continue
+                side = _game_line_side(
+                    market_key, str(outcome.get("name") or ""), home_name, away_name
+                )
+                if side is None:
+                    continue
+                try:
+                    price = _parse_odds_to_decimal(outcome.get("price"))
+                    point: Decimal | None = None
+                    if market_key != "h2h":
+                        raw_point = _parse_optional_decimal(outcome.get("point"))
+                        if raw_point is None:
+                            continue  # a missing line is never defaulted
+                        point = raw_point.quantize(_POINT_QUANTIZE)
+                except (ValueError, ArithmeticError) as exc:
+                    logger.debug(
+                        "Skipping game-line outcome in event %s (%s/%s): %s",
+                        event_external_id,
+                        book_key,
+                        market_key,
+                        exc,
+                    )
+                    continue
+                entries.setdefault((market_key, side), {}).setdefault(
+                    book_key, (book_key, point, price)
+                )
+
+    lines: list[IngestedGameLine] = []
+    for market_key in GAME_LINE_MARKETS:
+        first_side, second_side = _GAME_LINE_SIDES[market_key]
+        per_side = {
+            first_side: list(entries.get((market_key, first_side), {}).values()),
+            second_side: list(entries.get((market_key, second_side), {}).values()),
+        }
+        if not per_side[first_side] and not per_side[second_side]:
+            continue
+
+        consensus_point: Decimal | None = None
+        if market_key != "h2h":
+            # Normalise to the anchor side (home for spreads, over for totals).
+            normalized: list[tuple[str, Decimal]] = []
+            for side, side_entries in per_side.items():
+                for book_key, point, _price in side_entries:
+                    if point is None:
+                        continue
+                    flipped = market_key == "spreads" and side == second_side
+                    normalized.append((book_key, Decimal(0) - point if flipped else point))
+            sharp = [
+                (SHARP_BOOKMAKER_PRIORITY[b], p)
+                for b, p in normalized
+                if b in SHARP_BOOKMAKER_PRIORITY
+            ]
+            if sharp:
+                consensus_point = min(sharp, key=lambda item: item[0])[1]
+            else:
+                consensus_point = _median_low([p for _b, p in normalized])
+
+        for side in (first_side, second_side):
+            side_entries = per_side[side]
+            side_point: Decimal | None = None
+            if consensus_point is not None:
+                is_flipped = market_key == "spreads" and side == second_side
+                side_point = Decimal(0) - consensus_point if is_flipped else consensus_point
+            at_point = [e for e in side_entries if e[1] == side_point]
+            if not at_point:
+                continue
+            sharp_hits = [e for e in at_point if e[0] in SHARP_BOOKMAKER_PRIORITY]
+            if sharp_hits:
+                price = min(sharp_hits, key=lambda e: SHARP_BOOKMAKER_PRIORITY[e[0]])[2]
+            else:
+                price = _median_low([e[2] for e in at_point])
+            lines.append(
+                IngestedGameLine(
+                    event_external_id=event_external_id,
+                    sport_key=sport_key,
+                    market_key=market_key,
+                    side=side,
+                    point=side_point,
+                    decimal_odds=price,
+                    book_prices=[
+                        {
+                            "book": book_key,
+                            "point": None if point is None else f"{point:.2f}",
+                            "decimal_odds": f"{book_price:.4f}",
+                        }
+                        for book_key, point, book_price in sorted(side_entries, key=lambda e: e[0])
+                    ],
+                )
+            )
+    return lines
+
+
+def _extract_raw_events(raw_payload: Any) -> list[Any] | None:
+    if isinstance(raw_payload, Mapping):
+        for key in ("events", "data"):
+            if raw_payload.get(key) is not None:
+                candidate = raw_payload[key]
+                return candidate if isinstance(candidate, list) else None
+        return []
+    if isinstance(raw_payload, list):
+        return raw_payload
+    return None
+
+
+def fetch_game_lines(
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    supported_sports: Sequence[str] | None = None,
+    http_client: httpx.Client | None = None,
+    now_utc: datetime | None = None,
+    timeout_seconds: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
+) -> GameLinesFetchResult:
+    """Poll `h2h,spreads,totals` per sport and reduce to consensus lines.
+
+    Never raises on provider failure: errors are collected and no lines are returned for the
+    failed sport, so callers leave existing rows untouched. Raises only when no key is set.
+    """
+    settings = get_settings()
+    resolved_api_key = api_key if api_key is not None else settings.parlay_api_key
+    resolved_base_url = (base_url if base_url is not None else settings.parlay_api_base_url).rstrip(
+        "/"
+    )
+    sports_to_poll = (
+        tuple(supported_sports) if supported_sports is not None else settings.supported_sports
+    )
+    ref_now = _normalize_utc(now_utc) if now_utc is not None else datetime.now(UTC)
+    if not is_api_key_configured(resolved_api_key):
+        raise UpstreamIngestionError("PARLAY_API_KEY is missing or placeholder.")
+
+    headers = {
+        "Authorization": f"Bearer {resolved_api_key.strip()}",
+        "Accept": "application/json",
+    }
+    result = GameLinesFetchResult()
+    client = http_client if http_client is not None else httpx.Client(timeout=timeout_seconds)
+    try:
+        for sport_key in sports_to_poll:
+            sport_short = normalize_sport_key(sport_key)
+            url = f"{resolved_base_url}/sports/{quote(sport_key, safe='')}/odds"
+            params = {
+                "regions": "us",
+                "oddsFormat": "decimal",
+                "markets": ",".join(GAME_LINE_MARKETS),
+            }
+            result.requests += 1
+            try:
+                response = client.get(url, headers=headers, params=params)
+            except httpx.HTTPError as exc:
+                msg = f"HTTP transport error polling game lines for {sport_key}: {exc}"
+                logger.warning(msg)
+                result.errors.append(msg)
+                continue
+
+            # parlay-api.com reports the balance in `x-requests-remaining` (verified live in
+            # Story 8.1); `x-credits-remaining` is kept as a fallback spelling.
+            raw_credits = response.headers.get("x-requests-remaining") or response.headers.get(
+                "x-credits-remaining"
+            )
+            if raw_credits is not None:
+                try:
+                    result.credits_remaining = int(raw_credits)
+                except ValueError:
+                    pass
+
+            if response.status_code != 200:
+                msg = f"Upstream returned HTTP {response.status_code} for game lines {sport_key}."
+                logger.warning(msg)
+                result.errors.append(msg)
+                continue
+            try:
+                raw_events = _extract_raw_events(response.json())
+            except (ValueError, TypeError):
+                raw_events = None
+            if raw_events is None:
+                msg = f"Unusable game-lines payload for {sport_key}."
+                logger.warning(msg)
+                result.errors.append(msg)
+                continue
+
+            for raw_event in raw_events:
+                if not isinstance(raw_event, Mapping):
+                    continue
+                try:
+                    commence_dt = _parse_iso_datetime(raw_event.get("commence_time"))
+                    if commence_dt <= ref_now:
+                        continue
+                    raw_ev_id = raw_event.get("external_provider_id")
+                    if not _has_nonempty_id(raw_ev_id):
+                        raw_ev_id = raw_event.get("id")
+                    if not _has_nonempty_id(raw_ev_id):
+                        continue
+                    event_ext_id = _ensure_provider_prefix(
+                        raw_ev_id, prefix="papi", sport_short=sport_short
+                    )
+                    ev_sport = str(raw_event.get("sport_key") or sport_key).strip()
+                    lines = _reduce_game_lines(
+                        raw_event, event_external_id=event_ext_id, sport_key=ev_sport
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Skipping malformed game-lines event: %s", exc)
+                    continue
+                result.seen_event_external_ids.append(event_ext_id)
+                result.lines.extend(lines)
+    finally:
+        if http_client is None:
+            client.close()
+    return result
+
+
+def _game_lines_cache_payload(
+    event: Event, lines: Sequence[IngestedGameLine], fetched_at: datetime
+) -> str:
+    markets: dict[str, dict[str, Any]] = {}
+    for line in lines:
+        markets.setdefault(line.market_key, {})[line.side] = {
+            "point": None if line.point is None else f"{line.point:.2f}",
+            "decimal_odds": f"{line.decimal_odds:.4f}",
+            "book_prices": line.book_prices,
+        }
+    return json.dumps(
+        {
+            "event_id": str(event.event_id),
+            "sport_key": event.sport_key,
+            "fetched_at": format_iso8601_utc(fetched_at),
+            "markets": markets,
+        },
+        separators=(",", ":"),
+    )
+
+
+def upsert_game_lines(
+    session: Session,
+    result: GameLinesFetchResult,
+    *,
+    redis_client: RedisLike,
+    now_utc: datetime | None = None,
+    ttl_seconds: int = HOT_CACHE_TTL_SECONDS,
+) -> int:
+    """Idempotently persist consensus lines and cache them; returns rows written.
+
+    Only events present in the provider response are touched: their rows are upserted and any
+    market the provider no longer quotes is removed. Events absent from the response (provider
+    down, sport failed) keep their existing rows.
+    """
+    if not result.seen_event_external_ids:
+        return 0
+    fetched_at = _normalize_utc(now_utc) if now_utc is not None else datetime.now(UTC)
+
+    events = {
+        ev.external_provider_id: ev
+        for ev in session.scalars(
+            select(Event).where(Event.external_provider_id.in_(result.seen_event_external_ids))
+        )
+    }
+    # Last line wins per (event, market, side) so a duplicated event cannot violate the unique slot.
+    by_slot: dict[tuple[str, str, str], IngestedGameLine] = {}
+    for line in result.lines:
+        by_slot[(line.event_external_id, line.market_key, line.side)] = line
+    by_event: dict[str, list[IngestedGameLine]] = {}
+    for (event_ext, _market, _side), line in by_slot.items():
+        by_event.setdefault(event_ext, []).append(line)
+
+    unmatched = set(result.seen_event_external_ids) - set(events)
+    if unmatched:
+        logger.info(
+            "Game lines: %d event(s) not yet in the events table (live slate sync pending); skipped",
+            len(unmatched),
+        )
+
+    written = 0
+    cache_writes: list[tuple[str, str]] = []
+    for ext_id, event in events.items():
+        new_lines = by_event.get(ext_id, [])
+        existing = {
+            (row.market_key, row.side): row
+            for row in session.scalars(
+                select(EventLine).where(EventLine.event_id == event.event_id)
+            )
+        }
+        keep: set[tuple[str, str]] = set()
+        for line in new_lines:
+            slot = (line.market_key, line.side)
+            keep.add(slot)
+            row = existing.get(slot)
+            if row is None:
+                row = EventLine(event_id=event.event_id, market_key=line.market_key, side=line.side)
+                session.add(row)
+            row.point = line.point
+            row.decimal_odds = line.decimal_odds
+            row.book_prices = line.book_prices
+            row.fetched_at = fetched_at
+            written += 1
+        for slot, old_row in existing.items():
+            if slot not in keep:
+                session.delete(old_row)
+        if new_lines:
+            cache_writes.append(
+                (
+                    game_lines_key(event.sport_key, event.event_id),
+                    _game_lines_cache_payload(event, new_lines, fetched_at),
+                )
+            )
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    for key, payload in cache_writes:
+        try:
+            redis_client.set(key, payload, ex=ttl_seconds)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to cache game lines %s: %s", key, exc)
+    return written
+
+
+def run_game_lines_sync(
+    *,
+    session: Session,
+    redis_client: RedisLike,
+    http_client: httpx.Client | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    now_utc: datetime | None = None,
+    ttl_seconds: int = HOT_CACHE_TTL_SECONDS,
+) -> dict[str, Any]:
+    """One game-lines cycle: fetch, upsert, cache, and log requests and remaining credits."""
+    ref_now = _normalize_utc(now_utc) if now_utc is not None else datetime.now(UTC)
+    bind = session.get_bind()
+    if isinstance(bind, Engine) and not inspect(bind).has_table("event_lines"):
+        init_db(engine=bind)
+
+    try:
+        result = fetch_game_lines(
+            api_key=api_key, base_url=base_url, http_client=http_client, now_utc=ref_now
+        )
+    except UpstreamIngestionError as exc:
+        logger.warning("Game lines sync skipped: %s", exc)
+        return {
+            "status": "skipped",
+            "lines_written": 0,
+            "requests": 0,
+            "credits_remaining": None,
+            "errors": [str(exc)],
+        }
+
+    written = upsert_game_lines(
+        session, result, redis_client=redis_client, now_utc=ref_now, ttl_seconds=ttl_seconds
+    )
+    logger.info(
+        "Game lines sync: requests=%d x-credits-remaining=%s lines_written=%d errors=%d",
+        result.requests,
+        result.credits_remaining,
+        written,
+        len(result.errors),
+    )
+    status = "ok" if not result.errors else ("partial" if written else "error")
+    return {
+        "status": status,
+        "lines_written": written,
+        "requests": result.requests,
+        "credits_remaining": result.credits_remaining,
+        "errors": result.errors,
+    }

@@ -11,7 +11,7 @@ ParlayPal is a high-conviction sports betting intelligence platform built on a p
   - Reads exclusively from Redis 7.2 and PostgreSQL 16; never calls `parlay-api.com` directly for live feeds.
 - **Backing Services**:
   - **PostgreSQL 16**: Relational persistence for durable entities (`teams`, `events`, `player_props`, `user_bets`).
-  - **Redis 7.2**: Ephemeral hot odds cache (`odds:latest:{sport_key}:{event_id}`) with strict 45-second TTL, devigged EV feed cache (`ev:feed:{sport_key}`), and Pub/Sub bus (`odds:feed:{sport_key}`).
+  - **Redis 7.2**: Ephemeral hot odds cache (`odds:latest:{sport_key}:{event_id}`) with strict 45-second TTL, consensus game lines cache (`odds:lines:{sport_key}:{event_id}`, spread/moneyline/total, 45-second TTL; durable copy in PostgreSQL `event_lines`), devigged EV feed cache (`ev:feed:{sport_key}`), and Pub/Sub bus (`odds:feed:{sport_key}`).
     - MoneyLine game-log provider keys (worker only, not live odds, so the 45s TTL does not apply):
       - `ml:roster:{league}:{page}`: roster pages, TTL `moneyline_roster_ttl_seconds` (7 days).
       - `ml:gamelog:{league}:{player_id}`: per-player game log, TTL `moneyline_log_ttl_seconds` (20 hours; the vendor refreshes stats daily).
