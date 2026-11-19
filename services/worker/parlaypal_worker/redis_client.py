@@ -55,6 +55,11 @@ def odds_latest_key(sport_key: str, event_id: uuid.UUID | str) -> str:
     return f"odds:latest:{sport_key}:{event_id}"
 
 
+def game_lines_key(sport_key: str, event_id: uuid.UUID | str) -> str:
+    """Build namespaced Redis key `odds:lines:{sport_key}:{event_id}` (consensus game lines)."""
+    return f"odds:lines:{sport_key}:{event_id}"
+
+
 def ev_feed_key(sport_key: str) -> str:
     """Build namespaced Redis key `ev:feed:{sport_key}`."""
     return f"ev:feed:{sport_key}"

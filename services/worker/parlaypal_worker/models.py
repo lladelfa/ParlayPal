@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -237,6 +238,58 @@ class PlayerProp(Base):
         nullable=False,
         default="ACTIVE",
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class EventLine(Base):
+    """Consensus main line (spread, moneyline, total) for one side of an event market."""
+
+    __tablename__ = "event_lines"
+    __table_args__ = (
+        UniqueConstraint("event_id", "market_key", "side", name="uq_event_lines_event_market_side"),
+        Index("idx_event_lines_event", "event_id"),
+        CheckConstraint(
+            "market_key IN ('h2h', 'spreads', 'totals')",
+            name="ck_event_lines_market_key",
+        ),
+        CheckConstraint(
+            "side IN ('home', 'away', 'over', 'under')",
+            name="ck_event_lines_side",
+        ),
+        CheckConstraint(
+            "decimal_odds >= 1.01",
+            name="ck_event_lines_decimal_odds_min",
+        ),
+    )
+
+    line_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("events.event_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    market_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    # Consensus point (spread or total). NULL for moneyline; a real 0 (pick'em) is kept as 0.
+    point: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    decimal_odds: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    # [{"book": str, "point": str | None, "decimal_odds": str}, ...]
+    book_prices: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

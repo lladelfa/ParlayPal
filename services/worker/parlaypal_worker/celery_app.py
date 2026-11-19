@@ -37,6 +37,11 @@ def build_beat_schedule(live_slate_interval_seconds: float) -> dict[str, dict[st
             "schedule": live_slate_interval_seconds,
             "options": {"expires": live_slate_interval_seconds * 0.9},
         },
+        "sync-game-lines": {
+            "task": "parlaypal_worker.sync_game_lines",
+            "schedule": live_slate_interval_seconds,
+            "options": {"expires": live_slate_interval_seconds * 0.9},
+        },
         "stamp-closing-line-value-every-minute": {
             "task": "parlaypal_worker.stamp_closing_line_value",
             "schedule": 60.0,
@@ -436,6 +441,49 @@ def sync_live_slate(
             now_utc=now_utc,
         )
         return result.model_dump(mode="json")
+    finally:
+        if owns_redis and active_redis is not None:
+            close_redis_fn = getattr(active_redis, "close", None)
+            if callable(close_redis_fn):
+                close_redis_fn()
+        if owns_session and active_session is not None:
+            close_session_fn = getattr(active_session, "close", None)
+            if callable(close_session_fn):
+                close_session_fn()
+
+
+@celery_app.task(name="parlaypal_worker.sync_game_lines")
+def sync_game_lines(
+    *,
+    session: Session | None = None,
+    redis_client: RedisLike | None = None,
+    http_client: Any = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Poll upstream spread/moneyline/total lines, persist consensus lines, and cache them."""
+    from parlaypal_worker.ingestion import _parse_iso_datetime, run_game_lines_sync
+
+    owns_session = session is None
+    owns_redis = redis_client is None
+    active_session: Session | None = session
+    active_redis: RedisLike | None = redis_client
+
+    try:
+        if active_session is None:
+            active_session = create_session_factory()()
+        if active_redis is None:
+            active_redis = get_redis_client()
+        now_utc = _parse_iso_datetime(now) if isinstance(now, str) else now
+        return run_game_lines_sync(
+            session=active_session,
+            redis_client=active_redis,
+            http_client=http_client,
+            api_key=api_key,
+            base_url=base_url,
+            now_utc=now_utc,
+        )
     finally:
         if owns_redis and active_redis is not None:
             close_redis_fn = getattr(active_redis, "close", None)

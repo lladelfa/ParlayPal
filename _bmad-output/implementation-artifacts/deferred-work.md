@@ -68,3 +68,12 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-5-game-log-ingestion-for-upstream-players.md`
   summary: RESOLVED by story 6-7 (MoneyLine adapter): Choose and wire a real player game-log source (parlay-api is odds-only), then enable the 6.5 fetcher; decide how to handle `player_anytime_td` history.
   evidence: parlay-api.com docs list no game-log, box-score or results endpoint; 6.5 ships a config-driven, disabled-by-default fetcher so live upstream props stay "Limited history" until a source is configured.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-game-lines-ingestion-spread-moneyline-total.md`
+  summary: Story 8.2/8.3 must read game lines from PostgreSQL `event_lines` (fall back from the 45s `odds:lines:*` Redis key) and ignore lines whose event has started.
+  evidence: Redis key exists only about 45s of each 1800s cycle, and lines for started events are never refreshed or expired.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-game-lines-ingestion-spread-moneyline-total.md`
+  summary: Add a separate game-lines poll interval and a credit-floor guard (skip cycle when `x-requests-remaining` is low).
+  evidence: Live gate showed 3 credits per sport request; game lines add about 6 credits per cycle, roughly 17,000 credits per month of a 20,000 plan at 1800s.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-game-lines-ingestion-spread-moneyline-total.md`
+  summary: Decide whether an event returned with empty bookmakers should keep or expire its stored lines, and whether a one-sided market should be stored.
+  evidence: Current behavior deletes stored rows for an event the provider returns with no bookmakers (transient outage loses good data); a market with only one priced side at the consensus point is stored as one row.
