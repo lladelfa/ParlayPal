@@ -301,6 +301,10 @@ def sync_market_browser_feed(
     active_session = session if session is not None else create_session_factory()()
     active_redis = redis_client if redis_client is not None else get_redis_client()
     try:
+        if callable(getattr(active_session, "get_bind", None)):
+            from parlaypal_worker.ingestion import _ensure_schema_initialized
+
+            _ensure_schema_initialized(active_session)
         now_utc = datetime.now(UTC)
         props_stmt = select(PlayerProp).where(PlayerProp.status == "ACTIVE")
         props = list(active_session.scalars(props_stmt).all())

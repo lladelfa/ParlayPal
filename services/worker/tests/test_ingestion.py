@@ -412,6 +412,33 @@ def test_live_slate_sync_attaches_event_lines_to_browser_feed(
     assert spread["away"] is None
 
 
+def test_live_slate_sync_creates_missing_event_lines_table(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    """A database created before event_lines existed is upgraded instead of crashing the sync."""
+    session, _, _ = db_session
+    bind = session.get_bind()
+    EventLine.__table__.drop(bind=bind)  # type: ignore[attr-defined]
+    assert not inspect(bind).has_table("event_lines")
+
+    fixed_now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    transport = _build_upstream_mock_transport(fixed_now)
+    fake_redis = FakeRedisClient()
+    with httpx.Client(transport=transport) as http_client:
+        result = run_live_slate_sync(
+            session=session,
+            redis_client=fake_redis,
+            http_client=http_client,
+            api_key="test_live_key",
+            base_url="https://api.parlay-api.com/v1",
+            now_utc=fixed_now,
+        )
+
+    assert result.status == "ok"
+    assert inspect(bind).has_table("event_lines")
+    assert "markets:browser:all" in fake_redis.store
+
+
 # ---------------------------------------------------------------------------
 # Matrix Row 1: Upstream happy path & malformed individual prop isolation
 # ---------------------------------------------------------------------------

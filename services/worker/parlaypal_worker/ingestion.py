@@ -1842,7 +1842,8 @@ def _ensure_schema_initialized(session: Session) -> None:
     bind = session.get_bind()
     if isinstance(bind, Engine):
         inspector = inspect(bind)
-        if any(not inspector.has_table(table) for table in ("teams", "events", "player_props")):
+        required = ("teams", "events", "player_props", "event_lines")
+        if any(not inspector.has_table(table) for table in required):
             init_db(engine=bind)
 
 
