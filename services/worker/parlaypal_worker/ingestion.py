@@ -2431,11 +2431,21 @@ def run_live_slate_sync(
         )
         sync_preset_feed_to_redis(preset_feed, active_redis, ttl_seconds=ttl_seconds)
 
+        event_lines = (
+            list(
+                active_session.scalars(
+                    select(EventLine).where(EventLine.event_id.in_(list(events_map.keys())))
+                ).all()
+            )
+            if events_map
+            else []
+        )
         browser_feed = build_market_browser_feed(
             props=active_props,
             events_map=events_map,
             teams_map=teams_map,
             now_utc=ref_now,
+            lines=event_lines,
         )
         sync_market_browser_to_redis(browser_feed, active_redis, ttl_seconds=ttl_seconds)
 

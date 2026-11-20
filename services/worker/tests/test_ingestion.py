@@ -39,7 +39,7 @@ from parlaypal_worker.ingestion import (
     run_live_slate_sync,
     upsert_slate_to_db,
 )
-from parlaypal_worker.models import Event, PlayerProp, Team
+from parlaypal_worker.models import Event, EventLine, PlayerProp, Team
 from parlaypal_worker.redis_client import (
     HOT_CACHE_TTL_SECONDS,
     ev_feed_key,
@@ -365,6 +365,51 @@ def _build_upstream_mock_transport(
         return httpx.Response(404, json={"error": "not found"})
 
     return httpx.MockTransport(handler)
+
+
+def test_live_slate_sync_attaches_event_lines_to_browser_feed(
+    db_session: tuple[Session, Any, Any],
+) -> None:
+    """Stored event_lines surface as games[].lines in the markets:browser feed."""
+    session, _, _ = db_session
+    fixed_now = datetime(2026, 11, 12, 15, 0, tzinfo=UTC)
+    transport = _build_upstream_mock_transport(fixed_now)
+
+    def _sync(redis: FakeRedisClient) -> None:
+        with httpx.Client(transport=transport) as http_client:
+            run_live_slate_sync(
+                session=session,
+                redis_client=redis,
+                http_client=http_client,
+                api_key="test_live_key",
+                base_url="https://api.parlay-api.com/v1",
+                now_utc=fixed_now,
+            )
+
+    _sync(FakeRedisClient())
+    event = session.scalars(select(Event)).first()
+    assert event is not None
+    session.add(
+        EventLine(
+            event_id=event.event_id,
+            market_key="spreads",
+            side="home",
+            point=Decimal("-3.5"),
+            decimal_odds=Decimal("1.9091"),
+            book_prices=[],
+            fetched_at=fixed_now,
+        )
+    )
+    session.commit()
+
+    second_redis = FakeRedisClient()
+    _sync(second_redis)
+    games = json.loads(second_redis.store["markets:browser:all"])["games"]
+    by_id = {g["eventId"]: g for g in games}
+    spread = by_id[str(event.event_id)]["lines"]["spread"]
+    assert spread["home"]["americanOdds"] == -110
+    assert spread["home"]["point"] == "-3.50"
+    assert spread["away"] is None
 
 
 # ---------------------------------------------------------------------------

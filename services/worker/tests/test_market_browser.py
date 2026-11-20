@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from parlaypal_worker.models import Event, PlayerProp, Team
+from parlaypal_worker.models import Event, EventLine, PlayerProp, Team
 from parlaypal_worker.redis_client import markets_browser_key
 
 from parlaypal_worker.market_browser import (  # isort: skip
@@ -619,8 +619,19 @@ class _FakeScalarResult:
 class _FakeSession:
     """Minimal Session double that dispatches select() by entity type."""
 
-    def __init__(self, props: list[PlayerProp], events: list[Event], teams: list[Team]) -> None:
-        self._data: dict[type, list[Any]] = {PlayerProp: props, Event: events, Team: teams}
+    def __init__(
+        self,
+        props: list[PlayerProp],
+        events: list[Event],
+        teams: list[Team],
+        lines: list[EventLine] | None = None,
+    ) -> None:
+        self._data: dict[type, list[Any]] = {
+            PlayerProp: props,
+            Event: events,
+            Team: teams,
+            EventLine: lines or [],
+        }
         self.closed = False
 
     def scalars(self, stmt: Any) -> _FakeScalarResult:
@@ -678,3 +689,150 @@ def test_market_row_pushes_and_short_history(slate: dict[str, Any]) -> None:
     item = {p.prop_id: p for p in _build(slate).props}[prop.prop_id]
     assert item.hit_rate_display == "1/2 (50.0%) L10"
     assert item.sofascore_form == [False, True]
+
+
+# ---------------------------------------------------------------------------
+# Story 8.2: main lines on game summaries
+# ---------------------------------------------------------------------------
+
+
+def _line(
+    event: Event,
+    market_key: str,
+    side: str,
+    point: Decimal | None,
+    odds: str,
+) -> EventLine:
+    return EventLine(
+        line_id=uuid.uuid4(),
+        event_id=event.event_id,
+        market_key=market_key,
+        side=side,
+        point=point,
+        decimal_odds=Decimal(odds),
+        book_prices=[],
+        fetched_at=NOW_UTC,
+    )
+
+
+def _full_lines(event: Event) -> list[EventLine]:
+    return [
+        _line(event, "spreads", "away", Decimal("3.5"), "1.9091"),
+        _line(event, "spreads", "home", Decimal("-3.5"), "1.9091"),
+        _line(event, "h2h", "away", None, "2.4000"),
+        _line(event, "h2h", "home", None, "1.6061"),
+        _line(event, "totals", "over", Decimal("45.5"), "1.9091"),
+        _line(event, "totals", "under", Decimal("45.5"), "1.9091"),
+    ]
+
+
+def _build_with_lines(slate: dict[str, Any], lines: list[EventLine]) -> MarketBrowserFeed:
+    return build_market_browser_feed(
+        props=slate["props"],
+        events_map=slate["events_map"],
+        teams_map=slate["teams_map"],
+        now_utc=NOW_UTC,
+        lines=lines,
+    )
+
+
+def _game(feed: MarketBrowserFeed, event: Event) -> dict[str, Any]:
+    dumped = feed.model_dump(by_alias=True, mode="json")
+    return next(g for g in dumped["games"] if g["eventId"] == str(event.event_id))
+
+
+def test_game_lines_full(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    game = _game(_build_with_lines(slate, _full_lines(event)), event)
+    lines = game["lines"]
+    assert lines["spread"]["away"] == {
+        "point": "3.50",
+        "decimalOdds": "1.9091",
+        "americanOdds": -110,
+    }
+    assert lines["spread"]["home"]["point"] == "-3.50"
+    assert lines["moneyline"]["away"] == {
+        "point": None,
+        "decimalOdds": "2.4000",
+        "americanOdds": 140,
+    }
+    assert lines["moneyline"]["home"]["americanOdds"] == -165
+    assert lines["total"]["over"]["point"] == "45.50"
+    assert lines["total"]["under"]["americanOdds"] == -110
+
+
+def test_game_lines_partial_only_totals(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    totals = [ln for ln in _full_lines(event) if ln.market_key == "totals"]
+    lines = _game(_build_with_lines(slate, totals), event)["lines"]
+    assert lines["spread"] is None
+    assert lines["moneyline"] is None
+    assert lines["total"]["over"]["point"] == "45.50"
+
+
+def test_game_lines_missing_single_side_is_null(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    rows = [ln for ln in _full_lines(event) if not (ln.market_key == "h2h" and ln.side == "home")]
+    lines = _game(_build_with_lines(slate, rows), event)["lines"]
+    assert lines["moneyline"]["home"] is None
+    assert lines["moneyline"]["away"] is not None
+
+
+def test_game_lines_none_still_lists_game(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    game = _game(_build_with_lines(slate, []), event)
+    assert game["lines"] == {"spread": None, "moneyline": None, "total": None}
+    # Omitting the argument behaves the same.
+    assert _game(_build(slate), event)["lines"] == {
+        "spread": None,
+        "moneyline": None,
+        "total": None,
+    }
+
+
+def test_game_lines_pickem_zero_point_kept(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    rows = [
+        _line(event, "spreads", "away", Decimal("0"), "1.9091"),
+        _line(event, "spreads", "home", Decimal("0"), "1.9091"),
+    ]
+    lines = _game(_build_with_lines(slate, rows), event)["lines"]
+    assert lines["spread"]["away"]["point"] == "0.00"
+    assert lines["spread"]["home"]["point"] == "0.00"
+
+
+def test_game_lines_ignore_other_events(slate: dict[str, Any]) -> None:
+    other = slate["events"]["nba_today"]
+    lines = _game(_build_with_lines(slate, _full_lines(other)), slate["events"]["nfl_weekend"])
+    assert lines["lines"]["spread"] is None
+
+
+def test_game_lines_survive_redis_sync(slate: dict[str, Any]) -> None:
+    event = slate["events"]["nfl_weekend"]
+    feed = _build_with_lines(slate, _full_lines(event))
+    redis = MockRedis()
+    sync_market_browser_to_redis(feed, redis)
+    payload = json.loads(redis.store["markets:browser:nfl"])
+    game = next(g for g in payload["games"] if g["eventId"] == str(event.event_id))
+    assert game["lines"]["spread"]["away"]["americanOdds"] == -110
+
+
+def test_celery_sync_market_browser_feed_includes_lines(slate: dict[str, Any]) -> None:
+    from parlaypal_worker.celery_app import sync_market_browser_feed
+
+    real_now = datetime.now(UTC)
+    shift = real_now - NOW_UTC
+    for ev in slate["events_map"].values():
+        ev.commence_time = ev.commence_time + shift
+    event = slate["events"]["nba_today"]
+    session = _FakeSession(
+        props=slate["props"],
+        events=list(slate["events_map"].values()),
+        teams=list(slate["teams_map"].values()),
+        lines=_full_lines(event),
+    )
+    redis = MockRedis()
+    sync_market_browser_feed(session=session, redis_client=redis)
+    payload = json.loads(redis.store["markets:browser:all"])
+    game = next(g for g in payload["games"] if g["eventId"] == str(event.event_id))
+    assert game["lines"]["total"]["over"]["point"] == "45.50"

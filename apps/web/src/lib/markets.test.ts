@@ -48,6 +48,44 @@ describe("markets library", () => {
     expect(res[0].playerName).toBe("Derrick Henry");
   });
 
+  it("filters by eventId", () => {
+    const all = FALLBACK_MARKET_BROWSER_FEED.props;
+    const res = filterMarketProps(all, { eventId: "e1111111-1111-1111-1111-111111111111" });
+    expect(res.length).toBe(2);
+    expect(filterMarketProps(all, { eventId: "unknown" })).toEqual([]);
+  });
+
+  it("normalizes game lines in snake and camel case, keeping zero and null", () => {
+    const feed = normalizeMarketBrowserFeed({
+      props: [],
+      games: [
+        {
+          event_id: "g1",
+          lines: {
+            spread: {
+              home: { point: "0.00", decimal_odds: "1.9091", american_odds: -110 },
+              away: { point: "0.00", decimalOdds: "1.9091", americanOdds: -110 },
+            },
+            moneyline: {
+              home: null,
+              away: { point: null, decimalOdds: "2.4000", americanOdds: 140 },
+            },
+            total: null,
+          },
+        },
+        { eventId: "g2" },
+      ],
+    });
+    const g1 = feed!.games[0].lines!;
+    expect(g1.spread!.home!.point).toBe(0);
+    expect(g1.spread!.home!.americanOdds).toBe(-110);
+    expect(g1.spread!.away!.decimalOdds).toBe("1.9091");
+    expect(g1.moneyline!.home).toBeNull();
+    expect(g1.moneyline!.away!.point).toBeNull();
+    expect(g1.total).toBeNull();
+    expect(feed!.games[1].lines).toEqual({ spread: null, moneyline: null, total: null });
+  });
+
   it("recalculates prop row on live SSE odds delta", () => {
     const sample = FALLBACK_MARKET_BROWSER_FEED.props[0];
     const updated = recalculateMarketPropRow(sample, 2.1);

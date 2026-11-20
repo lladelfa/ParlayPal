@@ -52,6 +52,30 @@ export interface MarketPropRow {
   isHighValue: boolean;
 }
 
+/** One side of a main line. `point` is null for moneyline; 0 is a real pick'em. */
+export interface LinePrice {
+  point: number | null;
+  decimalOdds: string;
+  americanOdds: number;
+}
+
+export interface HomeAwayLines {
+  home: LinePrice | null;
+  away: LinePrice | null;
+}
+
+export interface TotalLines {
+  over: LinePrice | null;
+  under: LinePrice | null;
+}
+
+/** Consensus main lines; a market without data is null (never defaulted). */
+export interface GameLines {
+  spread: HomeAwayLines | null;
+  moneyline: HomeAwayLines | null;
+  total: TotalLines | null;
+}
+
 export interface ScheduledEventSummary {
   eventId: string;
   sportKey: "nfl" | "nba";
@@ -62,6 +86,7 @@ export interface ScheduledEventSummary {
   dateWindow: DateWindow;
   propCount: number;
   topHybridValueScore: number;
+  lines?: GameLines;
 }
 
 export interface MarketBrowserFeed {
