@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from parlaypal_worker.hit_rate import build_recent_form_display
-from parlaypal_worker.models import Event, PlayerProp, Team
+from parlaypal_worker.models import Event, EventLine, PlayerProp, Team
 from parlaypal_worker.presets import (
     _format_market_display,
     calculate_hybrid_value_score,
@@ -212,6 +212,78 @@ class MarketBrowserPropItem(BaseModel):
         return f"{v.quantize(Decimal('0.0001'))}"
 
 
+class LinePrice(BaseModel):
+    """One side of a main line: consensus point (None for moneyline) and price."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    point: Decimal | None = None
+    decimal_odds: Decimal = Field(..., alias="decimalOdds")
+    american_odds: int = Field(..., alias="americanOdds")
+
+    @field_serializer("point")
+    def serialize_point(self, v: Decimal | None) -> str | None:
+        if v is None:
+            return None
+        return f"{v.quantize(Decimal('0.01'))}"
+
+    @field_serializer("decimal_odds")
+    def serialize_decimal_odds(self, v: Decimal) -> str:
+        return f"{v.quantize(Decimal('0.0001'))}"
+
+
+class HomeAwayLines(BaseModel):
+    """Spread or moneyline prices per side; a missing side is None."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    home: LinePrice | None = None
+    away: LinePrice | None = None
+
+
+class TotalLines(BaseModel):
+    """Game total prices per side; a missing side is None."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    over: LinePrice | None = None
+    under: LinePrice | None = None
+
+
+class GameLines(BaseModel):
+    """Consensus main lines for a game; any market without rows is None."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    spread: HomeAwayLines | None = None
+    moneyline: HomeAwayLines | None = None
+    total: TotalLines | None = None
+
+
+def build_game_lines(rows: Sequence[EventLine]) -> GameLines:
+    """Group one event's EventLine rows into spread/moneyline/total."""
+    by_key = {(r.market_key, r.side): r for r in rows}
+
+    def price(market_key: str, side: str) -> LinePrice | None:
+        row = by_key.get((market_key, side))
+        if row is None:
+            return None
+        return LinePrice(
+            point=row.point,
+            decimalOdds=row.decimal_odds,
+            americanOdds=decimal_to_american(row.decimal_odds),
+        )
+
+    spread = HomeAwayLines(home=price("spreads", "home"), away=price("spreads", "away"))
+    moneyline = HomeAwayLines(home=price("h2h", "home"), away=price("h2h", "away"))
+    total = TotalLines(over=price("totals", "over"), under=price("totals", "under"))
+    return GameLines(
+        spread=spread if spread.home or spread.away else None,
+        moneyline=moneyline if moneyline.home or moneyline.away else None,
+        total=total if total.over or total.under else None,
+    )
+
+
 class ScheduledGameSummary(BaseModel):
     """Summary of scheduled event for browser slate navigation."""
 
@@ -226,6 +298,7 @@ class ScheduledGameSummary(BaseModel):
     date_window: Literal["today", "tomorrow", "weekend"] = Field(..., alias="dateWindow")
     prop_count: int = Field(0, alias="propCount")
     top_hybrid_value_score: int = Field(0, alias="topHybridValueScore")
+    lines: GameLines = Field(default_factory=GameLines)
 
     @field_serializer("event_id")
     def serialize_uuid(self, v: uuid.UUID) -> str:
@@ -256,10 +329,14 @@ def build_market_browser_feed(
     events_map: dict[uuid.UUID, Event],
     teams_map: dict[uuid.UUID, Team] | None = None,
     now_utc: datetime | None = None,
+    lines: Sequence[EventLine] | None = None,
 ) -> MarketBrowserFeed:
     """Build and rank MarketBrowserFeed from database entities."""
     ref_time = now_utc if now_utc is not None else datetime.now(UTC)
     teams = teams_map or {}
+    lines_by_event: dict[uuid.UUID, list[EventLine]] = {}
+    for line_row in lines or ():
+        lines_by_event.setdefault(line_row.event_id, []).append(line_row)
 
     items: list[MarketBrowserPropItem] = []
     events_with_props: dict[uuid.UUID, list[MarketBrowserPropItem]] = {}
@@ -433,6 +510,7 @@ def build_market_browser_feed(
                 dateWindow=date_win,  # type: ignore[arg-type]
                 propCount=len(prop_group),
                 topHybridValueScore=max_score,
+                lines=build_game_lines(lines_by_event.get(event_id, [])),
             )
         )
 

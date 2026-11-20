@@ -77,3 +77,9 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-8-1-game-lines-ingestion-spread-moneyline-total.md`
   summary: Decide whether an event returned with empty bookmakers should keep or expire its stored lines, and whether a one-sided market should be stored.
   evidence: Current behavior deletes stored rows for an event the provider returns with no bookmakers (transient outage loses good data); a market with only one priced side at the consensus point is stored as one row.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-2-slate-of-games-with-main-lines-click-to-filter.md`
+  summary: Add a DOM test harness (jsdom plus Testing Library) and cover click-to-filter, toggle-off, Clear and `?game=` preselect in `MarketBrowser`.
+  evidence: Component tests only use `renderToStaticMarkup`, so the headline selection behavior runs untested; removing the filter wiring would not fail any test.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-2-slate-of-games-with-main-lines-click-to-filter.md`
+  summary: Refresh the slate games and their lines after page load (poll the markets feed), not only props via SSE.
+  evidence: `MarketBrowser` reads `initialFeed.games` once, so lines, prop counts and started games stay stale until reload; the epic's 30-second refresh does not exist in the component.

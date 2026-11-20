@@ -294,13 +294,17 @@ def sync_market_browser_feed(
         build_market_browser_feed,
         sync_market_browser_to_redis,
     )
-    from parlaypal_worker.models import Event, PlayerProp, Team
+    from parlaypal_worker.models import Event, EventLine, PlayerProp, Team
 
     owns_session = session is None
     owns_redis = redis_client is None
     active_session = session if session is not None else create_session_factory()()
     active_redis = redis_client if redis_client is not None else get_redis_client()
     try:
+        if callable(getattr(active_session, "get_bind", None)):
+            from parlaypal_worker.ingestion import _ensure_schema_initialized
+
+            _ensure_schema_initialized(active_session)
         now_utc = datetime.now(UTC)
         props_stmt = select(PlayerProp).where(PlayerProp.status == "ACTIVE")
         props = list(active_session.scalars(props_stmt).all())
@@ -313,11 +317,22 @@ def sync_market_browser_feed(
         teams = list(active_session.scalars(teams_stmt).all())
         teams_map = {t.team_id: t for t in teams}
 
+        lines = (
+            list(
+                active_session.scalars(
+                    select(EventLine).where(EventLine.event_id.in_(list(events_map.keys())))
+                ).all()
+            )
+            if events_map
+            else []
+        )
+
         feed = build_market_browser_feed(
             props=props,
             events_map=events_map,
             teams_map=teams_map,
             now_utc=now_utc,
+            lines=lines,
         )
 
         sync_market_browser_to_redis(feed, active_redis, ttl_seconds=45)

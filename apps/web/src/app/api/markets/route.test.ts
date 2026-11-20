@@ -63,6 +63,67 @@ describe("GET /api/markets", () => {
     expect(data.props[0].playerName).toBe("Stephen Curry");
   });
 
+  it("filters props to a single game via ?game=", async () => {
+    const res = await GET(
+      new Request("http://localhost:3000/api/markets?game=e1111111-1111-1111-1111-111111111111"),
+    );
+    const data = await res.json();
+    expect(data.props.length).toBe(2);
+    expect(
+      data.props.every(
+        (p: { eventId: string }) => p.eventId === "e1111111-1111-1111-1111-111111111111",
+      ),
+    ).toBe(true);
+  });
+
+  it("passes game lines through, including null cells", async () => {
+    const fakeClient = new FakeRedisClient();
+    fakeClient.store.set(
+      "markets:browser:all",
+      JSON.stringify({
+        generatedAt: "2026-11-15T19:36:42Z",
+        sportKey: "all",
+        games: [
+          {
+            eventId: "g1",
+            sportKey: "nfl",
+            matchup: "A @ B",
+            homeTeamAbbreviation: "B",
+            awayTeamAbbreviation: "A",
+            commenceTime: "2026-11-16T00:00:00Z",
+            dateWindow: "today",
+            propCount: 1,
+            topHybridValueScore: 50,
+            lines: {
+              spread: {
+                home: { point: "-3.50", decimalOdds: "1.9091", americanOdds: -110 },
+                away: null,
+              },
+              moneyline: null,
+              total: null,
+            },
+          },
+        ],
+        props: [
+          {
+            propId: "p1",
+            eventId: "g1",
+            sportKey: "nfl",
+            playerName: "X Y",
+            matchup: "A @ B",
+            marketKey: "player_pass_yds",
+            marketLabel: "Passing Yards",
+          },
+        ],
+      }),
+    );
+    setRedisClientFactory(() => fakeClient);
+    const data = await (await GET(new Request("http://localhost:3000/api/markets"))).json();
+    expect(data.games[0].lines.spread.home.point).toBe(-3.5);
+    expect(data.games[0].lines.spread.away).toBeNull();
+    expect(data.games[0].lines.moneyline).toBeNull();
+  });
+
   it("coerces string lineValue and falls back to markets:browser:snapshot:all", async () => {
     const fakeClient = new FakeRedisClient();
     const snapshotFeed = {

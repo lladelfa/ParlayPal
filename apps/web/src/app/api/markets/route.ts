@@ -16,12 +16,15 @@ export async function GET(request: Request): Promise<NextResponse> {
     const market = (searchParams.get("market") ?? "all") as MarketFilter;
     const q = searchParams.get("q") ?? undefined;
 
+    const game = searchParams.get("game") || undefined;
+
     const feed = await getMarketBrowserFeed(sport);
     const filteredProps = filterMarketProps(feed.props, {
       sport,
       dateWindow: date,
       market,
       query: q,
+      eventId: game,
     });
 
     const activeEventIds = new Set(filteredProps.map((p) => p.eventId));

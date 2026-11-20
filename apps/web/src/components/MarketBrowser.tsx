@@ -6,17 +6,127 @@ import type {
   MarketBrowserFeed as MarketBrowserFeedType,
   MarketFilter,
   MarketPropRow,
+  ScheduledEventSummary,
   SportFilter,
 } from "@/types/market";
 import {
   CANONICAL_MARKETS_BY_SPORT,
   filterMarketProps,
+  formatMoney,
+  formatSpread,
+  formatTotal,
   recalculateMarketPropRow,
 } from "@/lib/market-filters";
 import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 
 interface MarketBrowserProps {
   initialFeed: MarketBrowserFeedType;
+}
+
+/** Returns the id only if it names a game in the slate; otherwise null. */
+export function resolveGameParam(
+  games: ScheduledEventSummary[],
+  id: string | null,
+): string | null {
+  if (!id) return null;
+  return games.some((g) => g.eventId === id) ? id : null;
+}
+
+/** Sets or removes `game` in the query string, keeping other params and the hash. */
+export function withGameParam(
+  pathname: string,
+  search: string,
+  hash: string,
+  gameId: string | null,
+): string {
+  const params = new URLSearchParams(search);
+  if (gameId) {
+    params.set("game", gameId);
+  } else {
+    params.delete("game");
+  }
+  const qs = params.toString();
+  return `${pathname}${qs ? `?${qs}` : ""}${hash}`;
+}
+
+function formatStart(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function SlateGameCard({
+  game,
+  selected,
+  onSelect,
+}: {
+  game: ScheduledEventSummary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const lines = game.lines;
+  const rows = [
+    {
+      team: game.awayTeamAbbreviation,
+      spread: formatSpread(lines?.spread?.away),
+      money: formatMoney(lines?.moneyline?.away),
+      total: formatTotal(lines?.total?.over, "O"),
+    },
+    {
+      team: game.homeTeamAbbreviation,
+      spread: formatSpread(lines?.spread?.home),
+      money: formatMoney(lines?.moneyline?.home),
+      total: formatTotal(lines?.total?.under, "U"),
+    },
+  ];
+
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={`flex w-full min-w-0 flex-col gap-2 rounded-xl p-3 text-left transition-all cursor-pointer border ${
+        selected
+          ? "bg-surface-module border-accent-cyan shadow-[0_0_12px_rgba(6,182,212,0.3)]"
+          : "bg-surface-card border-border-hairline hover:border-accent-cyan/50"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="font-semibold text-text-primary">{game.matchup}</span>
+        <span className="flex items-center gap-2 shrink-0">
+          <span
+            className="text-[11px] text-text-muted font-telemetry"
+            suppressHydrationWarning
+          >
+            {formatStart(game.commenceTime)}
+          </span>
+          <span className="rounded bg-surface-module px-1.5 py-0.5 text-[10px] text-accent-cyan font-telemetry">
+            {game.propCount} props
+          </span>
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[17rem] grid-cols-[3rem_1fr_1fr_1fr] gap-x-2 gap-y-1 font-telemetry text-xs">
+          <span />
+          <span className="text-[10px] uppercase tracking-wider text-text-muted">Spread</span>
+          <span className="text-[10px] uppercase tracking-wider text-text-muted">Money</span>
+          <span className="text-[10px] uppercase tracking-wider text-text-muted">Total</span>
+          {rows.map((r) => (
+            <React.Fragment key={r.team}>
+              <span className="font-semibold text-text-primary">{r.team}</span>
+              <span className="text-text-primary">{r.spread}</span>
+              <span className="text-text-primary">{r.money}</span>
+              <span className="text-text-primary">{r.total}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
@@ -28,7 +138,31 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   const [sseConnected, setSseConnected] = useState(false);
   const [lastTickTime, setLastTickTime] = useState<string | null>(null);
 
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+
   const { slip, addMarketProp, setCandidatePool } = useParlayDrawer();
+
+  // Preselect from a shared ?game=<event_id> link (unknown ids are ignored).
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("game");
+    setSelectedGameId(resolveGameParam(initialFeed.games, fromUrl));
+  }, [initialFeed.games]);
+
+  // Toggle selection and mirror it to ?game= without a Next navigation (no refetch).
+  const selectGame = (eventId: string | null) => {
+    const next = eventId === selectedGameId ? null : eventId;
+    setSelectedGameId(next);
+    try {
+      const { pathname, search, hash } = window.location;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        withGameParam(pathname, search, hash, next),
+      );
+    } catch {
+      // URL sync is best effort
+    }
+  };
 
   // Sync candidate pool to ParlayDrawerContext so leg swapper can surface alternatives
   useEffect(() => {
@@ -119,11 +253,20 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
     };
   }, []);
 
+  // Slate is derived from the feed by sport/date only, never by the game filter.
+  const slateGames = initialFeed.games.filter(
+    (g) =>
+      (sport === "all" || g.sportKey === sport) &&
+      (dateWindow === "all" || g.dateWindow === dateWindow),
+  );
+  const selectedGame = slateGames.find((g) => g.eventId === selectedGameId) ?? null;
+
   const visibleProps = filterMarketProps(props, {
     sport,
     dateWindow,
     market,
     query: searchQuery,
+    eventId: selectedGame?.eventId ?? null,
   });
 
   const availableMarkets: { key: string; label: string }[] =
@@ -273,29 +416,33 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
         </div>
       </div>
 
-      {/* Matchup Schedule Overview Badges */}
-      {initialFeed.games.length > 0 && (
-        <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
-          <span className="text-xs font-semibold uppercase tracking-wider text-text-muted shrink-0">
-            Upcoming Slate:
-          </span>
-          {initialFeed.games
-            .filter(
-              (g) =>
-                (sport === "all" || g.sportKey === sport) &&
-                (dateWindow === "all" || g.dateWindow === dateWindow),
-            )
-            .map((g) => (
-            <div
-              key={g.eventId}
-              className="flex items-center gap-2 rounded-lg bg-surface-module px-3 py-1.5 border border-border-hairline shrink-0 text-xs"
-            >
-              <span className="font-semibold text-text-primary">{g.matchup}</span>
-              <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-accent-cyan font-telemetry">
-                {g.propCount} props
-              </span>
-            </div>
-          ))}
+      {/* Slate of games with main lines; click a card to filter props */}
+      {slateGames.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+              Upcoming Slate
+            </span>
+            {selectedGame && (
+              <button
+                type="button"
+                onClick={() => selectGame(null)}
+                className="rounded-lg bg-surface-card px-2.5 py-1 text-xs font-medium text-text-muted hover:text-text-primary border border-border-hairline cursor-pointer"
+              >
+                Clear game filter ✕
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {slateGames.map((g) => (
+              <SlateGameCard
+                key={g.eventId}
+                game={g}
+                selected={g.eventId === selectedGameId}
+                onSelect={() => selectGame(g.eventId)}
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -303,12 +450,26 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
       <div className="rounded-xl bg-surface-card border border-border-hairline overflow-hidden shadow-lg">
         {visibleProps.length === 0 ? (
           <div className="p-12 text-center text-text-muted">
-            <p className="font-display text-lg font-semibold text-text-primary">
-              No matching player props found
-            </p>
-            <p className="mt-1 text-xs">
-              Try adjusting your sport, date window, or prop market filters.
-            </p>
+            {selectedGame ? (
+              <>
+                <p className="font-display text-lg font-semibold text-text-primary">
+                  No props for {selectedGame.matchup}
+                </p>
+                <p className="mt-1 text-xs">
+                  Adjust the sport, date, prop market or search filters, or clear the
+                  game filter.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-display text-lg font-semibold text-text-primary">
+                  No matching player props found
+                </p>
+                <p className="mt-1 text-xs">
+                  Try adjusting your sport, date window, or prop market filters.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-border-hairline/60">

@@ -1,4 +1,6 @@
 import type {
+  GameLines,
+  LinePrice,
   MarketBrowserFeed,
   MarketPropRow,
   ScheduledEventSummary,
@@ -124,6 +126,58 @@ function normalizeMarketPropRow(raw: unknown): MarketPropRow | null {
   };
 }
 
+function normalizeLinePrice(raw: unknown): LinePrice | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as JsonRecord;
+  const decimalOdds = coerceNullableString(
+    pickField(obj, "decimalOdds", "decimal_odds"),
+  );
+  const americanOdds = coerceNullableNumber(
+    pickField(obj, "americanOdds", "american_odds"),
+  );
+  if (decimalOdds === null || americanOdds === null) {
+    return null;
+  }
+  return {
+    point: coerceNullableNumber(obj.point),
+    decimalOdds,
+    americanOdds,
+  };
+}
+
+function asRecord(raw: unknown): JsonRecord | null {
+  return raw && typeof raw === "object" ? (raw as JsonRecord) : null;
+}
+
+function normalizeGameLines(raw: unknown): GameLines {
+  const obj = asRecord(raw) ?? {};
+  const spread = asRecord(obj.spread);
+  const moneyline = asRecord(obj.moneyline);
+  const total = asRecord(obj.total);
+  return {
+    spread: spread
+      ? {
+          home: normalizeLinePrice(spread.home),
+          away: normalizeLinePrice(spread.away),
+        }
+      : null,
+    moneyline: moneyline
+      ? {
+          home: normalizeLinePrice(moneyline.home),
+          away: normalizeLinePrice(moneyline.away),
+        }
+      : null,
+    total: total
+      ? {
+          over: normalizeLinePrice(total.over),
+          under: normalizeLinePrice(total.under),
+        }
+      : null,
+  };
+}
+
 function normalizeGameSummary(raw: unknown): ScheduledEventSummary | null {
   if (!raw || typeof raw !== "object") {
     return null;
@@ -162,6 +216,7 @@ function normalizeGameSummary(raw: unknown): ScheduledEventSummary | null {
       pickField(obj, "topHybridValueScore", "top_hybrid_value_score"),
       0,
     ),
+    lines: normalizeGameLines(obj.lines),
   };
 }
 
@@ -207,6 +262,20 @@ export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
       dateWindow: "today",
       propCount: 2,
       topHybridValueScore: 88,
+      lines: {
+        spread: {
+          away: { point: 2.5, decimalOdds: "1.9091", americanOdds: -110 },
+          home: { point: -2.5, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+        moneyline: {
+          away: { point: null, decimalOdds: "2.2000", americanOdds: 120 },
+          home: { point: null, decimalOdds: "1.6667", americanOdds: -150 },
+        },
+        total: {
+          over: { point: 224.5, decimalOdds: "1.9091", americanOdds: -110 },
+          under: { point: 224.5, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+      },
     },
     {
       eventId: "e2222222-2222-2222-2222-222222222222",
@@ -218,6 +287,20 @@ export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
       dateWindow: "tomorrow",
       propCount: 2,
       topHybridValueScore: 89,
+      lines: {
+        spread: {
+          away: { point: 0, decimalOdds: "1.9091", americanOdds: -110 },
+          home: { point: 0, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+        moneyline: {
+          away: { point: null, decimalOdds: "1.9091", americanOdds: -110 },
+          home: { point: null, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+        total: {
+          over: { point: 45.5, decimalOdds: "1.9091", americanOdds: -110 },
+          under: { point: 45.5, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+      },
     },
     {
       eventId: "e3333333-3333-3333-3333-333333333333",
@@ -240,6 +323,20 @@ export const FALLBACK_MARKET_BROWSER_FEED: MarketBrowserFeed = {
       dateWindow: "weekend",
       propCount: 2,
       topHybridValueScore: 86,
+      lines: {
+        spread: {
+          away: { point: 3.5, decimalOdds: "1.9091", americanOdds: -110 },
+          home: { point: -3.5, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+        moneyline: {
+          away: { point: null, decimalOdds: "2.4000", americanOdds: 140 },
+          home: { point: null, decimalOdds: "1.6061", americanOdds: -165 },
+        },
+        total: {
+          over: { point: 45.5, decimalOdds: "1.9091", americanOdds: -110 },
+          under: { point: 45.5, decimalOdds: "1.9091", americanOdds: -110 },
+        },
+      },
     },
   ],
   props: [

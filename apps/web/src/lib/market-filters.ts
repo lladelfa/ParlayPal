@@ -1,4 +1,10 @@
-import type { MarketPropRow, SportFilter, DateWindowFilter, MarketFilter } from "@/types/market";
+import type {
+  DateWindowFilter,
+  LinePrice,
+  MarketFilter,
+  MarketPropRow,
+  SportFilter,
+} from "@/types/market";
 import { computeHybridValueScore, decimalToAmerican } from "@/lib/math";
 
 export const CANONICAL_MARKETS_BY_SPORT: Record<"nfl" | "nba", Record<string, string>> = {
@@ -21,9 +27,15 @@ export function filterMarketProps(
     dateWindow?: DateWindowFilter;
     market?: MarketFilter;
     query?: string;
+    eventId?: string | null;
   },
 ): MarketPropRow[] {
   let result = [...props];
+
+  if (filters.eventId) {
+    const eventId = filters.eventId;
+    result = result.filter((p) => p.eventId === eventId);
+  }
 
   const sport = filters.sport ?? "all";
   if (sport !== "all") {
@@ -59,6 +71,45 @@ export function filterMarketProps(
   }
 
   return result;
+}
+
+const MISSING = "—";
+
+export function formatAmerican(odds: number): string {
+  return odds > 0 ? `+${odds}` : `${odds}`;
+}
+
+/** Spread cell: "+3.5 -110", pick'em "PK -110", missing "—". */
+export function formatSpread(price: LinePrice | null | undefined): string {
+  if (!price || price.point === null) {
+    return MISSING;
+  }
+  const point =
+    price.point === 0
+      ? "PK"
+      : price.point > 0
+        ? `+${price.point}`
+        : `${price.point}`;
+  return `${point} ${formatAmerican(price.americanOdds)}`;
+}
+
+/** Moneyline cell: "+140", missing "—". */
+export function formatMoney(price: LinePrice | null | undefined): string {
+  if (!price) {
+    return MISSING;
+  }
+  return formatAmerican(price.americanOdds);
+}
+
+/** Total cell: "O 45.5 -110", missing "—". */
+export function formatTotal(
+  price: LinePrice | null | undefined,
+  side: "O" | "U",
+): string {
+  if (!price || price.point === null) {
+    return MISSING;
+  }
+  return `${side} ${price.point} ${formatAmerican(price.americanOdds)}`;
 }
 
 export function recalculateMarketPropRow(
