@@ -7,6 +7,7 @@ import type {
   ValueTier,
 } from "@/types/market";
 import { createRedisClient, marketsBrowserKey } from "@/lib/redis";
+import { readGameLogs } from "@/lib/game-logs";
 import { sampleDataEnabled } from "@/lib/presets";
 import {
   CANONICAL_MARKETS_BY_SPORT,
@@ -611,4 +612,44 @@ export async function getMarketBrowserFeed(sportKey?: string): Promise<MarketBro
   }
 
   return { ...FALLBACK_MARKET_BROWSER_FEED, reason: "sample" };
+}
+
+export interface GameDetail {
+  game: ScheduledEventSummary;
+  props: MarketPropRow[];
+  /** propId -> newest-first stats; null when no usable log is cached. */
+  logs: Record<string, number[] | null>;
+}
+
+/** Loads one game from the browser feed plus cached player logs; null if not in the feed. */
+export async function getGameDetail(eventId: string): Promise<GameDetail | null> {
+  const feed = await getMarketBrowserFeed();
+  const game = feed.games.find((g) => g.eventId === eventId);
+  if (!game) return null;
+  const startMs = new Date(game.commenceTime).getTime();
+  if (Number.isFinite(startMs) && startMs <= Date.now()) return null; // started: stale feed
+  const props = feed.props.filter((p) => p.eventId === eventId);
+
+  let logs: Record<string, number[] | null> = Object.fromEntries(
+    props.map((p) => [p.propId, null]),
+  );
+  let redis: ReturnType<typeof createRedisClient> | null = null;
+  try {
+    redis = createRedisClient();
+    if (typeof redis.connect === "function") {
+      await redis.connect();
+    }
+    logs = await readGameLogs(redis, props);
+  } catch (err) {
+    console.warn(`Game logs unavailable (${(err as Error).message}).`);
+  } finally {
+    if (redis) {
+      try {
+        redis.disconnect();
+      } catch {
+        // Ignore disconnect cleanup error
+      }
+    }
+  }
+  return { game, props, logs };
 }

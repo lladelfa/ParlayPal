@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import type {
   DateWindowFilter,
   MarketBrowserFeed as MarketBrowserFeedType,
@@ -59,15 +60,7 @@ function formatStart(iso: string): string {
   });
 }
 
-export function SlateGameCard({
-  game,
-  selected,
-  onSelect,
-}: {
-  game: ScheduledEventSummary;
-  selected: boolean;
-  onSelect: () => void;
-}) {
+export function MainLinesGrid({ game }: { game: ScheduledEventSummary }) {
   const lines = game.lines;
   const rows = [
     {
@@ -84,6 +77,35 @@ export function SlateGameCard({
     },
   ];
 
+  return (
+    <div className="overflow-x-auto">
+      <div className="grid min-w-[17rem] grid-cols-[3rem_1fr_1fr_1fr] gap-x-2 gap-y-1 font-telemetry text-xs">
+        <span />
+        <span className="text-[10px] uppercase tracking-wider text-text-muted">Spread</span>
+        <span className="text-[10px] uppercase tracking-wider text-text-muted">Money</span>
+        <span className="text-[10px] uppercase tracking-wider text-text-muted">Total</span>
+        {rows.map((r) => (
+          <React.Fragment key={r.team}>
+            <span className="font-semibold text-text-primary">{r.team}</span>
+            <span className="text-text-primary">{r.spread}</span>
+            <span className="text-text-primary">{r.money}</span>
+            <span className="text-text-primary">{r.total}</span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function SlateGameCard({
+  game,
+  selected,
+  onSelect,
+}: {
+  game: ScheduledEventSummary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
     <button
       type="button"
@@ -109,22 +131,7 @@ export function SlateGameCard({
           </span>
         </span>
       </div>
-      <div className="overflow-x-auto">
-        <div className="grid min-w-[17rem] grid-cols-[3rem_1fr_1fr_1fr] gap-x-2 gap-y-1 font-telemetry text-xs">
-          <span />
-          <span className="text-[10px] uppercase tracking-wider text-text-muted">Spread</span>
-          <span className="text-[10px] uppercase tracking-wider text-text-muted">Money</span>
-          <span className="text-[10px] uppercase tracking-wider text-text-muted">Total</span>
-          {rows.map((r) => (
-            <React.Fragment key={r.team}>
-              <span className="font-semibold text-text-primary">{r.team}</span>
-              <span className="text-text-primary">{r.spread}</span>
-              <span className="text-text-primary">{r.money}</span>
-              <span className="text-text-primary">{r.total}</span>
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
+      <MainLinesGrid game={game} />
     </button>
   );
 }
@@ -435,12 +442,19 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {slateGames.map((g) => (
-              <SlateGameCard
-                key={g.eventId}
-                game={g}
-                selected={g.eventId === selectedGameId}
-                onSelect={() => selectGame(g.eventId)}
-              />
+              <div key={g.eventId} className="flex min-w-0 flex-col gap-1">
+                <SlateGameCard
+                  game={g}
+                  selected={g.eventId === selectedGameId}
+                  onSelect={() => selectGame(g.eventId)}
+                />
+                <Link
+                  href={`/games/${g.eventId}`}
+                  className="self-end text-xs font-medium text-accent-cyan hover:underline"
+                >
+                  Open game →
+                </Link>
+              </div>
             ))}
           </div>
         </div>
@@ -488,7 +502,7 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   );
 }
 
-function MarketPropRowItem({
+export function MarketPropRowItem({
   prop,
   isInSlip,
   onAddToSlip,

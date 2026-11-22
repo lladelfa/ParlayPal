@@ -73,6 +73,33 @@ export function filterMarketProps(
   return result;
 }
 
+/** Props for the selected market tab; "all" keeps everything. */
+export function filterByTab(props: MarketPropRow[], tab: string): MarketPropRow[] {
+  return tab === "all" ? props : props.filter((p) => p.marketKey === tab);
+}
+
+/** Market tabs for a game's props: only markets present, canonical order, labelled. */
+export function marketTabs(props: MarketPropRow[]): { key: string; label: string }[] {
+  const present = new Set(props.map((p) => p.marketKey));
+  const tabs: { key: string; label: string }[] = [];
+  const seen = new Set<string>();
+  for (const sport of ["nfl", "nba"] as const) {
+    for (const [key, label] of Object.entries(CANONICAL_MARKETS_BY_SPORT[sport])) {
+      if (present.has(key)) {
+        tabs.push({ key, label });
+        seen.add(key);
+      }
+    }
+  }
+  for (const p of props) {
+    if (!seen.has(p.marketKey)) {
+      seen.add(p.marketKey);
+      tabs.push({ key: p.marketKey, label: p.marketLabel || p.marketKey });
+    }
+  }
+  return tabs;
+}
+
 const MISSING = "—";
 
 export function formatAmerican(odds: number): string {
