@@ -538,7 +538,15 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
         </div>
       )}
 
-      <SortBar sort={sort} onChoose={chooseSort} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SortBar sort={sort} onChoose={chooseSort} />
+        <Link
+          href="/about#score"
+          className="text-xs font-semibold text-accent-cyan hover:underline"
+        >
+          What is this score?
+        </Link>
+      </div>
 
       {/* Props Screener Table / List */}
       <div className="rounded-xl bg-surface-card border border-border-hairline overflow-hidden shadow-lg">

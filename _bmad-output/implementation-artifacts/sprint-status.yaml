@@ -89,7 +89,7 @@ development_status:
   8-2-slate-of-games-with-main-lines-click-to-filter: done
   8-3-game-detail-page: done
   8-4-sortable-market-browser: review
-  8-5-about-how-it-works: backlog
+  8-5-about-how-it-works: review
   epic-8-retrospective: optional
 action_items:
   - id: "epic-6-retro-item-1-fix-the-schema-upgrade-check-so-_ensure_"
