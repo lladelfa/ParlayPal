@@ -4,6 +4,8 @@ import {
   formatMoney,
   formatSpread,
   formatTotal,
+  filterByTab,
+  marketTabs,
 } from "./market-filters";
 
 const price = (point: number | null, americanOdds: number) => ({
@@ -43,5 +45,34 @@ describe("main line formatting", () => {
     expect(formatMoney(null)).toBe("—");
     expect(formatTotal(null, "O")).toBe("—");
     expect(formatSpread(price(null, -110))).toBe("—");
+  });
+});
+
+describe("filterByTab", () => {
+  it("keeps all for 'all' and restricts to one market otherwise", () => {
+    const rows = [
+      { propId: "a", marketKey: "player_points" },
+      { propId: "b", marketKey: "player_threes" },
+    ] as never[];
+    expect(filterByTab(rows, "all")).toHaveLength(2);
+    expect(filterByTab(rows, "player_threes")).toEqual([rows[1]]);
+    expect(filterByTab(rows, "player_rebounds")).toEqual([]);
+  });
+});
+
+describe("marketTabs", () => {
+  it("returns only markets that have props, in canonical order, with labels", () => {
+    const mk = (marketKey: string, sportKey: "nfl" | "nba") =>
+      ({ marketKey, sportKey, marketLabel: marketKey }) as never;
+    const tabs = marketTabs([
+      mk("player_threes", "nba"),
+      mk("player_points", "nba"),
+      mk("player_points", "nba"),
+    ]);
+    expect(tabs).toEqual([
+      { key: "player_points", label: "Points" },
+      { key: "player_threes", label: "Threes" },
+    ]);
+    expect(marketTabs([])).toEqual([]);
   });
 });

@@ -83,3 +83,7 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-8-2-slate-of-games-with-main-lines-click-to-filter.md`
   summary: Refresh the slate games and their lines after page load (poll the markets feed), not only props via SSE.
   evidence: `MarketBrowser` reads `initialFeed.games` once, so lines, prop counts and started games stay stale until reload; the epic's 30-second refresh does not exist in the component.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-3-game-detail-page.md`
+  summary: Add a cross-language contract test tying the web `gameLogKey` to the worker `game_log_cache_key`.
+  evidence: Web re-implements the key by hand and its tests only compare against literals; if the worker key or sport string changes, every game page silently shows "Limited history".

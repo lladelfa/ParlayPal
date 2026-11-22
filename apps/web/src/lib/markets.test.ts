@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setRedisClientFactory, marketsBrowserKey, type RedisClient } from "./redis";
 import {
   FALLBACK_MARKET_BROWSER_FEED,
   filterMarketProps,
+  getGameDetail,
   normalizeMarketBrowserFeed,
   recalculateMarketPropRow,
 } from "./markets";
@@ -127,5 +129,82 @@ describe("markets library", () => {
     expect(updated.hybridValueScore).toBe(90);
     expect(updated.valueTier).not.toBe("HIGH_VALUE");
     expect(updated.isHighValue).toBe(false);
+  });
+});
+
+describe("getGameDetail", () => {
+  afterEach(() => {
+    setRedisClientFactory(null);
+    vi.unstubAllEnvs();
+  });
+  const feed = FALLBACK_MARKET_BROWSER_FEED;
+  const game = feed.games.find((g) => g.eventId.startsWith("e1111"))!;
+  const fakeRedis = (store: Record<string, string>, fail = false): RedisClient =>
+    ({
+      connect: async () => {},
+      get: async (k: string) => {
+        if (fail) throw new Error("down");
+        return store[k] ?? null;
+      },
+      disconnect: () => {},
+      quit: async () => {},
+    }) as unknown as RedisClient;
+
+  it("returns the game, its props and logs", async () => {
+    setRedisClientFactory(() =>
+      fakeRedis({ [marketsBrowserKey()]: JSON.stringify(feed) }),
+    );
+    const detail = await getGameDetail(game.eventId);
+    expect(detail?.game.eventId).toBe(game.eventId);
+    expect(detail?.props.length).toBe(2);
+    expect(detail?.props.every((p) => p.eventId === game.eventId)).toBe(true);
+    expect(Object.keys(detail!.logs).length).toBe(2);
+  });
+
+  it("returns null for an unknown id", async () => {
+    setRedisClientFactory(() =>
+      fakeRedis({ [marketsBrowserKey()]: JSON.stringify(feed) }),
+    );
+    expect(await getGameDetail("nope")).toBeNull();
+  });
+
+  it("returns null for a game that has already started", async () => {
+    const started = {
+      ...feed,
+      games: feed.games.map((g) =>
+        g.eventId === game.eventId
+          ? { ...g, commenceTime: new Date(Date.now() - 60_000).toISOString() }
+          : g,
+      ),
+    };
+    setRedisClientFactory(() =>
+      fakeRedis({ [marketsBrowserKey()]: JSON.stringify(started) }),
+    );
+    expect(await getGameDetail(game.eventId)).toBeNull();
+  });
+
+  it("keeps the game with null logs when log reads fail", async () => {
+    const feedKey = marketsBrowserKey();
+    setRedisClientFactory(
+      () =>
+        ({
+          connect: async () => {},
+          get: async (k: string) => {
+            if (k === feedKey) return JSON.stringify(feed);
+            throw new Error("log read failed");
+          },
+          disconnect: () => {},
+          quit: async () => {},
+        }) as unknown as RedisClient,
+    );
+    const detail = await getGameDetail(game.eventId);
+    expect(detail?.game.eventId).toBe(game.eventId);
+    expect(Object.values(detail!.logs).every((v) => v === null)).toBe(true);
+  });
+
+  it("returns null when Redis is unreachable", async () => {
+    vi.stubEnv("PARLAYPAL_SAMPLE_DATA", "");
+    setRedisClientFactory(() => fakeRedis({}, true));
+    expect(await getGameDetail(game.eventId)).toBeNull();
   });
 });

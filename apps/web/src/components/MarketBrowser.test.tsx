@@ -23,6 +23,17 @@ const nflFull = games.find((g) => g.eventId.startsWith("e4444"))!;
 const nbaNoLines = games.find((g) => g.eventId.startsWith("e3333"))!;
 const pickem = games.find((g) => g.eventId.startsWith("e2222"))!;
 
+describe("MarketBrowser slate", () => {
+  it("links every game to its detail page", () => {
+    const markup = renderToStaticMarkup(
+      <MarketBrowser initialFeed={FALLBACK_MARKET_BROWSER_FEED} />,
+    );
+    for (const g of FALLBACK_MARKET_BROWSER_FEED.games) {
+      expect(markup).toContain(`href="/games/${g.eventId}"`);
+    }
+  });
+});
+
 describe("SlateGameCard", () => {
   it("renders teams, props count and the full Spread / Money / Total grid", () => {
     const markup = renderToStaticMarkup(
