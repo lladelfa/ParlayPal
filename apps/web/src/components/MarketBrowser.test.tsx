@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MarketBrowser,
   SlateGameCard,
+  SortBar,
   resolveGameParam,
   withGameParam,
 } from "./MarketBrowser";
@@ -31,6 +32,26 @@ describe("MarketBrowser slate", () => {
     for (const g of FALLBACK_MARKET_BROWSER_FEED.games) {
       expect(markup).toContain(`href="/games/${g.eventId}"`);
     }
+  });
+});
+
+describe("SortBar", () => {
+  it("offers every sort field and marks the active one with its direction", () => {
+    const markup = renderToStaticMarkup(
+      <SortBar sort={{ field: "ev", dir: "asc" }} onChoose={() => {}} />,
+    );
+    for (const label of ["Player", "Team", "Market", "Line", "Odds", "EV", "Hit Rate", "Score"]) {
+      expect(markup).toContain(label);
+    }
+    expect(markup).toContain("Sort by EV, ascending");
+    expect(markup).toContain("▲");
+  });
+
+  it("renders in the market browser", () => {
+    const markup = renderToStaticMarkup(
+      <MarketBrowser initialFeed={FALLBACK_MARKET_BROWSER_FEED} />,
+    );
+    expect(markup).toContain("Sort by Score, descending");
   });
 });
 

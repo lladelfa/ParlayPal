@@ -18,6 +18,16 @@ import {
   formatTotal,
   recalculateMarketPropRow,
 } from "@/lib/market-filters";
+import {
+  DEFAULT_SORT,
+  SORT_FIELDS,
+  defaultDir,
+  parseSortParam,
+  sortMarketProps,
+  withSortParam,
+  type SortField,
+  type SortState,
+} from "@/lib/market-sort";
 import { useParlayDrawer } from "@/context/ParlayDrawerContext";
 
 interface MarketBrowserProps {
@@ -136,6 +146,46 @@ export function SlateGameCard({
   );
 }
 
+export function SortBar({
+  sort,
+  onChoose,
+}: {
+  sort: SortState;
+  onChoose: (field: SortField) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Sort props">
+      <span className="text-xs font-semibold text-text-muted uppercase tracking-wider mr-1">
+        Sort:
+      </span>
+      {SORT_FIELDS.map(({ field, label }) => {
+        const active = sort.field === field;
+        return (
+          <button
+            key={field}
+            type="button"
+            aria-current={active ? "true" : undefined}
+            aria-label={
+              active
+                ? `Sort by ${label}, ${sort.dir === "asc" ? "ascending" : "descending"}`
+                : `Sort by ${label}`
+            }
+            onClick={() => onChoose(field)}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              active
+                ? "bg-accent-violet text-text-primary shadow-[0_0_10px_rgba(99,102,241,0.3)]"
+                : "bg-surface-card text-text-muted hover:text-text-primary border border-border-hairline"
+            }`}
+          >
+            {label}
+            {active ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   const [props, setProps] = useState<MarketPropRow[]>(initialFeed.props);
   const [sport, setSport] = useState<SportFilter>("all");
@@ -146,6 +196,7 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   const [lastTickTime, setLastTickTime] = useState<string | null>(null);
 
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
 
   const { slip, addMarketProp, setCandidatePool } = useParlayDrawer();
 
@@ -154,6 +205,30 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
     const fromUrl = new URLSearchParams(window.location.search).get("game");
     setSelectedGameId(resolveGameParam(initialFeed.games, fromUrl));
   }, [initialFeed.games]);
+
+  // Restore the sort from ?sort=&dir= once on mount.
+  useEffect(() => {
+    setSort(parseSortParam(window.location.search));
+  }, []);
+
+  // Clicking the active field flips direction; a new field starts in its natural direction.
+  const chooseSort = (field: SortField) => {
+    const next: SortState =
+      field === sort.field
+        ? { field, dir: sort.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: defaultDir(field) };
+    setSort(next);
+    try {
+      const { pathname, search, hash } = window.location;
+      window.history.replaceState(
+        window.history.state,
+        "",
+        withSortParam(pathname, search, hash, next),
+      );
+    } catch {
+      // URL sync is best effort
+    }
+  };
 
   // Toggle selection and mirror it to ?game= without a Next navigation (no refetch).
   const selectGame = (eventId: string | null) => {
@@ -268,13 +343,16 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
   );
   const selectedGame = slateGames.find((g) => g.eventId === selectedGameId) ?? null;
 
-  const visibleProps = filterMarketProps(props, {
-    sport,
-    dateWindow,
-    market,
-    query: searchQuery,
-    eventId: selectedGame?.eventId ?? null,
-  });
+  const visibleProps = sortMarketProps(
+    filterMarketProps(props, {
+      sport,
+      dateWindow,
+      market,
+      query: searchQuery,
+      eventId: selectedGame?.eventId ?? null,
+    }),
+    sort,
+  );
 
   const availableMarkets: { key: string; label: string }[] =
     sport === "nfl"
@@ -459,6 +537,8 @@ export function MarketBrowser({ initialFeed }: MarketBrowserProps) {
           </div>
         </div>
       )}
+
+      <SortBar sort={sort} onChoose={chooseSort} />
 
       {/* Props Screener Table / List */}
       <div className="rounded-xl bg-surface-card border border-border-hairline overflow-hidden shadow-lg">
