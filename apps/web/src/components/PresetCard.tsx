@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import type { PresetCard as PresetCardType, PresetLeg } from "@/types/preset";
 
 interface PresetCardProps {
@@ -53,6 +54,12 @@ export function PresetCard({ card, onCustomize, onQuickPick }: PresetCardProps) 
               <span className="rounded bg-surface-module px-2 py-0.5 font-telemetry text-xs font-bold text-accent-cyan border border-border-hairline">
                 Score {card.hybridValueScore}
               </span>
+              <Link
+                href="/about#score"
+                className="text-[11px] font-semibold text-accent-cyan hover:underline"
+              >
+                What is this score?
+              </Link>
             </div>
             <h3 className="mt-2 font-display text-[20px] leading-[26px] font-semibold text-text-primary">
               {card.title}

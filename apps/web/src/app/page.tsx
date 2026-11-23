@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCuratedPresetFeed } from "@/lib/presets";
 import { getMarketBrowserFeed } from "@/lib/markets";
 import { TerminalView } from "@/components/TerminalView";
@@ -25,6 +26,13 @@ export default async function HomePage() {
             High-conviction NFL &amp; NBA presets, schedule screener, rolling hit rates, and devigged fair value.
           </p>
         </div>
+
+        <Link
+          href="/about"
+          className="rounded-lg border border-border-hairline bg-surface-module px-4 py-2.5 text-xs font-semibold text-accent-cyan hover:border-accent-cyan/40"
+        >
+          About &amp; How It Works
+        </Link>
 
         <div className="flex items-center gap-3 rounded-lg bg-surface-module px-4 py-2.5 border border-border-hairline">
           <span className="h-2.5 w-2.5 rounded-full bg-accent-emerald animate-pulse" />
