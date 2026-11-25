@@ -39,6 +39,7 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-15: Truthful Consistency & Conviction Data** — Consistency badges, form dots and rationale are computed from real game logs and the leg's actual side and price; missing evidence is labelled, never fabricated.
 - **FR-16: Trustworthy Live Feed** — When live data is unavailable or yields no qualifying presets, the app says so explicitly instead of showing sample legs; no persisted or scored value is a fabricated default; prop market keys are canonical across providers.
 - **FR-17: Game-Centric Browsing** — Users browse a slate of games showing main lines (spread, moneyline, total), select a game to filter props or open a game detail view (main lines, props by market, player history), sort the market browser by any displayed field, and read an in-app explanation of how the site and its score work.
+- **FR-18: Honest Handoff & Player History** — The parlay sidebar scrolls independently; sportsbook handoff uses only verified link formats and otherwise says honestly what it does; clicking a player opens a player card with tonight's props and durable historical game stats.
 
 ### NonFunctional Requirements
 
@@ -85,6 +86,7 @@ This document provides the complete epic and story breakdown for ParlayPal, deco
 - **FR-15:** Epic 6 — Truthful Consistency & Conviction Data
 - **FR-16:** Epic 7 — Trustworthy Live Feed
 - **FR-17:** Epic 8 — Game-Centric Browsing
+- **FR-18:** Epic 9 — Honest Handoff & Player History
 
 ## Epic List
 
@@ -119,6 +121,10 @@ Bettors and the developer can tell at a glance whether the feed is live. An empt
 ### Epic 8: Game-Centric Browsing & Explainability
 Bettors browse a Fanatics-style slate of games with main lines (spread, moneyline, total), click a game to filter props or open a game page (main lines, props by market tab, player history), sort the market browser by score, player, team and more, and learn how the site and its score work from an About page.
 **FRs covered:** FR-17
+
+### Epic 9: Fix & Deepen — Honest Handoff and Player History
+Bettors review long parlays in a sidebar that scrolls on its own, hand off to a sportsbook through a link that actually works (or an honest copy-and-open fallback), and click any player to open a card with tonight's props and their stored historical game stats.
+**FRs covered:** FR-18
 
 
 ## Epic 1: Curated Preset Parlays & Value Feed
@@ -604,3 +610,87 @@ So that I understand what the numbers mean before I act on them.
 **And** a short "What is this score?" link on preset cards and the market browser points to the relevant section.
 
 **Edge cases:** copy must be written from the code (score formula, thresholds) at implementation time, not from memory, so it cannot drift from behavior.
+
+## Epic 9: Fix & Deepen — Honest Handoff and Player History
+
+Scoped in party mode on 2026-11-25 with John, Winston, Sally, Amelia and Murat, after the owner reviewed the running site. Three findings drive it. First, the desktop parlay sidebar (`ParlayDrawer.tsx`, `sticky top-6 self-start`, no height cap) only scrolls with the page. Second, QuickPick links land on a "you got lost" page: `lib/quickpick.ts` targets `https://quickpick.pikkit.com/v1/betslip` and deep-link schemes (`fanduel://sportsbook/betslip?quickpick=`, etc.) that spec 3.2 never cited a source for, so its green tests only verify our own format. Third, the owner wants a player card with historical stats on day one. Today there is no players entity: a player is the `player_props.player_name` string, and the only history the web can read is the per-market `gamelog:{sport}:{player}:{market}` Redis series (bare values, no dates or opponents, TTL-bound). Story 9.3 is the data story and gates 9.4. Stories 9.1 and 9.2 are independent and may run first or in parallel.
+
+### Story 9.1: Parlay Sidebar Scrolls Independently
+
+As a bettor building a parlay on desktop,
+I want the parlay sidebar to scroll on its own,
+So that I can review all my legs without scrolling the whole page to the bottom.
+
+**Acceptance Criteria:**
+
+**Given** the desktop (`xl` and wider) parlay sidebar on the Schedule & Market Browsing and game pages,
+**When** the legs exceed the viewport height,
+**Then** the sidebar is capped at the viewport height below its sticky offset and its leg list scrolls independently of the main pane,
+**And** the header and the footer (payout, total odds, handoff actions) stay visible while the leg list scrolls,
+**And** scrolling the leg list to its end does not chain into the main page (`overscroll-contain`),
+**And** with few legs the sidebar keeps its natural height (no empty stretched panel), and the mobile bottom sheet is unchanged.
+
+**Edge cases:** 1 leg and the maximum (8) legs; window resized below `xl` while open; browser zoom at 150%.
+
+### Story 9.2: Honest Sportsbook Handoff (QuickPick Reality Check)
+
+As a bettor,
+I want the handoff button to take me somewhere that works,
+So that I never land on an error page after building a parlay.
+
+**Task 1 (gate, timeboxed to half a day):** establish from primary sources (vendor docs, a live request, a real device) whether (a) Pikkit or any other service publishes a working betslip-link format we may use, and (b) each integrated book (FanDuel, DraftKings, BetMGM, Caesars, Fanatics, Sleeper) accepts a third-party prefilled betslip via URL or app scheme. Record the findings, with sources, in the spec. The current failure is a "you got lost" page from `quickpick.pikkit.com/v1/betslip`.
+
+**Acceptance Criteria:**
+
+**Given** a parlay in the drawer and a chosen sportsbook,
+**When** I trigger the handoff,
+**Then** if Task 1 found a verified prefilled-slip format for that book, the link uses exactly that format (source cited in code and spec),
+**Otherwise** the action is relabelled honestly (for example "Copy slip & open FanDuel"): it copies the slip as text (player, market, side, line, American odds per leg, plus total odds) to the clipboard and opens a verified URL for that book (event page if a verified event URL exists, else the book's sportsbook home),
+**And** no generated link points at an unverified host or scheme; the `quickpick.pikkit.com` URL and the unverified `*://sportsbook/betslip?quickpick=` schemes are removed or replaced,
+**And** bet auto-staging (`/api/bets/stage`) still records the bet with whatever URL was actually used,
+**And** the About page's QuickPick section and any UI copy describe what the button really does,
+**And** a manual reachability check (script or opt-in test, excluded from CI) requests every configured web fallback URL and fails on a 4xx/5xx.
+
+**Edge cases:** clipboard permission denied (show the slip text in a selectable box instead); a book with no verified URL (hide or disable that book with a reason, never a dead link); 1-leg slip.
+
+### Story 9.3: Player Identity & Historical Game-Log Persistence
+
+As a bettor,
+I want the app to keep each player's game history,
+So that player cards can show real historical stats instead of a short cached series.
+
+**Task 1 (gate):** confirm from a live MoneyLine response which per-game fields are available for NBA and NFL (`gameDate` is known; check opponent, home/away, minutes or snaps, and every stat behind our canonical markets) and the credit cost. If opponent or date is missing, record that and drop it from 9.4's table instead of inventing it.
+
+**Acceptance Criteria:**
+
+**Given** the worker fetches a player's game log from the MoneyLine provider,
+**When** the fetch succeeds,
+**Then** a `players` row exists for that player (UUID v4 `player_id`, `external_provider_id` with a provider prefix such as `ml_nba_<id>`, display name, normalized name via `normalize_player_name`, sport, team when known) and each game is upserted into a durable `player_game_logs` table (player, `game_date` as `TIMESTAMPTZ` UTC, opponent and home/away when provided, per-stat values as decimals, source, `fetched_at`) keyed so re-fetching never duplicates a game,
+**And** `player_props` gains a nullable `player_id` foreign key, set when the prop's `player_name` resolves unambiguously to exactly one player in that sport,
+**And** an ambiguous or unmatched name (for example "Kenneth Walker III" vs "Ken Walker", two same-name players) leaves `player_id` null and is logged, never guessed,
+**And** no stat value is ever a fabricated default: a stat the provider did not return is stored as missing,
+**And** the existing `ml:*` and `gamelog:*` Redis behavior, the MoneyLine rate limit, and hit-rate computation are unchanged,
+**And** the schema-upgrade path creates the new tables and column on an existing database (see Epic 6 retro item 1).
+
+**Edge cases:** suffixes and punctuation in names; traded player (team changes, history kept); provider returns zero games; re-ingestion of a corrected stat updates the row.
+
+### Story 9.4: Player Card With Historical Stats
+
+As a bettor,
+I want to click a player's name and see their card with tonight's props and their historical stats,
+So that I can judge a prop against the player's real track record.
+
+**Acceptance Criteria:**
+
+**Given** a player name in the market browser, game page, parlay drawer or a preset card,
+**When** I click it,
+**Then** a player card opens as a slide-over panel (full-screen sheet at mobile width) without losing my place or my parlay, and the same card is reachable at `/players/<player_id>` for linked players,
+**And** the card shows a header (name, team, sport) and **Tonight**: every current prop for the player with line, Over/Under prices, L5/L10/season hit rate and form dots, each with the existing add-to-slip action,
+**And** **History** from Story 9.3: a game-log table, most recent first (date, opponent and home/away if 9.3 Task 1 found them, and the stat columns relevant to the sport), with season averages and last-10 averages per stat,
+**And** selecting a market highlights that stat column and marks each game over/under against tonight's line,
+**And** a player whose prop is not linked to a `players` row, or who has no stored games, shows Tonight plus an honest "No history on file" state, never placeholder numbers,
+**And** the web reads only PostgreSQL and Redis (no provider calls), and the card works at mobile width.
+
+**Edge cases:** unknown `player_id` URL (not-found state); a player with props in two games; very long name; keyboard and screen-reader access (focus trapped in the panel, Escape closes it).
+
+**Out of scope:** charts beyond the table and averages, head-to-head splits, injury news, player search page.

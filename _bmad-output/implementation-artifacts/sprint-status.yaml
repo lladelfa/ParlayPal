@@ -91,6 +91,13 @@ development_status:
   8-4-sortable-market-browser: review
   8-5-about-how-it-works: review
   epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-parlay-sidebar-scrolls-independently: backlog
+  9-2-honest-sportsbook-handoff-quickpick-reality-check: backlog
+  9-3-player-identity-historical-game-log-persistence: backlog
+  9-4-player-card-with-historical-stats: backlog
+  epic-9-retrospective: optional
 action_items:
   - id: "epic-6-retro-item-1-fix-the-schema-upgrade-check-so-_ensure_"
     epic: 6
