@@ -87,3 +87,7 @@ This file tracks technical debt, edge cases, and architectural watch-items ident
 - source_spec: `_bmad-output/implementation-artifacts/spec-8-3-game-detail-page.md`
   summary: Add a cross-language contract test tying the web `gameLogKey` to the worker `game_log_cache_key`.
   evidence: Web re-implements the key by hand and its tests only compare against literals; if the worker key or sport string changes, every game page silently shows "Limited history".
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-parlay-drawer-sidebar-scroll.md`
+  summary: Add Epic 9 ("Fix and deepen": 9.1 drawer scroll, 9.2 honest handoff, 9.3 player game-log persistence, 9.4 player card) to epics.md and sprint-status.yaml.
+  evidence: Epic 9 exists only in party-mode scoping notes from 2026-11-25; story 9-1 had no sprint-status key, so its status could not be synced.

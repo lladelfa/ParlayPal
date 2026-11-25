@@ -182,7 +182,7 @@ export function ParlayDrawer() {
       {/* DESKTOP RAIL (>= 1280px / xl:block)                                      */}
       {/* ========================================================================= */}
       <aside
-        className={`hidden xl:flex w-[360px] shrink-0 flex-col rounded-xl border border-border-hairline bg-surface-card p-5 shadow-2xl transition-all duration-200 self-start sticky top-6 ${
+        className={`hidden xl:flex w-[360px] shrink-0 flex-col rounded-xl border border-border-hairline bg-surface-card p-5 shadow-2xl transition-all duration-200 self-start sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto overscroll-contain ${
           !isOpen && legCount === 0 ? "opacity-80" : ""
         }`}
         aria-label="Parlay Slip Drawer"
@@ -266,7 +266,7 @@ export function ParlayDrawer() {
         {/* Expanded Bottom Sheet */}
         {legCount > 0 && !isDocked && isOpen && (
           <div className="fixed inset-0 z-50 flex flex-col justify-end bg-surface-canvas/80 backdrop-blur-sm">
-            <div className="relative max-h-[85vh] w-full overflow-hidden rounded-t-2xl border-t border-border-hairline bg-surface-card p-5 shadow-2xl flex flex-col">
+            <div className="relative max-h-[85dvh] w-full overflow-hidden rounded-t-2xl border-t border-border-hairline bg-surface-card p-5 shadow-2xl flex flex-col">
               {/* Mobile Sheet Handle / Header */}
               <div className="flex items-center justify-between border-b border-border-hairline pb-4 mb-4">
                 <div className="flex items-center gap-2">
@@ -285,7 +285,7 @@ export function ParlayDrawer() {
               </div>
 
               {/* Drawer Content */}
-              <div className="overflow-y-auto flex-1">
+              <div className="min-h-0 overflow-y-auto overscroll-contain flex-1">
                 <DrawerContent
                   slip={slip}
                   legCount={legCount}
